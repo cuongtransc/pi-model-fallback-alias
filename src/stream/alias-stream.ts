@@ -25,6 +25,7 @@ import {
 	type FailoverEntryData,
 } from "../fallback/index.ts";
 import { requestOptions, type ResolvedTargetAuth } from "./request-options.ts";
+import { mapContextToTarget, type AliasTargetIdentity } from "./context-identity.ts";
 import type { ProviderResponseMetadata } from "../latency/stats.ts";
 import type { AliasSession } from "../status/session-status.ts";
 import { resolveAuthenticatedTarget } from "./target-auth.ts";
@@ -102,7 +103,7 @@ function createFallbackStream(
 				const stream = openTargetStream(
 					kind,
 					target,
-					context,
+					mapContextToTarget(context, target.model),
 					withResponseCapture(options, (response) => metadataByTarget.set(targetRef, response)),
 					linkedSignal(options?.signal, attemptSignal),
 				);
@@ -221,13 +222,20 @@ function withAliasIdentity(event: AssistantMessageEvent, aliasModel: Model<Api>)
 	return { ...event, partial: withAliasMessageIdentity(event.partial, aliasModel) };
 }
 
-function withAliasMessageIdentity(message: AssistantMessage, aliasModel: Model<Api>): AssistantMessage {
+type AliasIdentityMessage = AssistantMessage & { aliasTarget: AliasTargetIdentity };
+
+function withAliasMessageIdentity(message: AssistantMessage, aliasModel: Model<Api>): AliasIdentityMessage {
 	return {
 		...message,
 		api: aliasModel.api,
 		provider: aliasModel.provider,
 		model: aliasModel.id,
 		responseModel: message.responseModel ?? message.model,
+		aliasTarget: {
+			api: message.api,
+			provider: message.provider,
+			model: message.model,
+		},
 	};
 }
 

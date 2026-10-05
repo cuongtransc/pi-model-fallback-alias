@@ -5,6 +5,7 @@ import type {
 	AssistantMessage,
 	AssistantMessageEvent,
 	AssistantMessageEventStream,
+	Context,
 	Model,
 	ProviderResponse,
 	StreamOptions,
@@ -233,6 +234,73 @@ test("keeps the policy captured when the stream started", async () => {
 	assert.equal(records.find(({ event }) => event === "attempt-latency")?.data?.configLoadMs, 1);
 });
 
+test("maps alias history to the selected target before opening the stream", async () => {
+	const context = aliasHistoryContext({
+		api: "target-api",
+		provider: "target-provider",
+		model: "target-model",
+	});
+	const seen: Context[] = [];
+	const { stream } = aliasStream(
+		{ "target-model": asyncEvents(doneEvent(targetMessage())) },
+		{ context, onProviderContext: (received) => seen.push(received) },
+	);
+
+	await collect(stream);
+
+	assert.equal(seen.length, 1);
+	const message = seen[0]?.messages[0];
+	assert.equal(message?.role, "assistant");
+	if (message?.role !== "assistant") assert.fail("expected assistant message");
+	assert.equal(message.api, "target-api");
+	assert.equal(message.provider, "target-provider");
+	assert.equal(message.model, "target-model");
+	assert.deepEqual(
+		message.content.map((block) => block.type),
+		["thinking", "text", "toolCall"],
+	);
+	// The caller's stored history is never mutated.
+	assert.equal(context.messages[0]?.content.length, 3);
+});
+
+test("drops foreign alias thinking before opening the stream", async () => {
+	const context = aliasHistoryContext({
+		api: "openai-completions",
+		provider: "deepseek",
+		model: "deepseek-chat",
+	});
+	const seen: Context[] = [];
+	const { stream } = aliasStream(
+		{ "target-model": asyncEvents(doneEvent(targetMessage())) },
+		{ context, onProviderContext: (received) => seen.push(received) },
+	);
+
+	await collect(stream);
+
+	const message = seen[0]?.messages[0];
+	if (message?.role !== "assistant") assert.fail("expected assistant message");
+	assert.deepEqual(
+		message.content.map((block) => block.type),
+		["text", "toolCall"],
+	);
+	assert.ok(!JSON.stringify(seen[0]).includes("foreign thinking"));
+});
+
+test("records the resolved target on forwarded alias messages", async () => {
+	const { stream } = aliasStream({ "target-model": asyncEvents(doneEvent(targetMessage())) });
+
+	const events = await collect(stream);
+
+	const done = doneOf(events[0]!) as AssistantMessage & {
+		aliasTarget?: { api: string; provider: string; model: string };
+	};
+	assert.deepEqual(done.aliasTarget, {
+		api: "target-api",
+		provider: "target-provider",
+		model: "target-model",
+	});
+});
+
 function streamFor(events: readonly AssistantMessageEvent[] | AsyncIterable<AssistantMessageEvent>): AssistantMessageEventStream {
 	const { stream } = aliasStream({ "target-model": events });
 	return stream;
@@ -241,6 +309,8 @@ function streamFor(events: readonly AssistantMessageEvent[] | AsyncIterable<Assi
 interface AliasStreamTestOptions {
 	providerResponse?: ProviderResponse;
 	streamOptions?: StreamOptions;
+	context?: Context;
+	onProviderContext?(context: Context): void;
 	log?(event: string, data?: Record<string, unknown>): void;
 	onTargetSelected?(role: string, targetRef: string): void;
 	policy?: AliasPolicy;
@@ -267,10 +337,12 @@ function aliasStream(
 				},
 				getProvider() {
 					return {
-						stream(model: Model<Api>, _context: unknown, streamOptions?: StreamOptions) {
+						stream(model: Model<Api>, context: Context, streamOptions?: StreamOptions) {
+							options.onProviderContext?.(context);
 							return providerEvents(responses[model.id]!, streamOptions, options.providerResponse);
 						},
-						streamSimple(model: Model<Api>, _context: unknown, streamOptions?: StreamOptions) {
+						streamSimple(model: Model<Api>, context: Context, streamOptions?: StreamOptions) {
+							options.onProviderContext?.(context);
 							return providerEvents(responses[model.id]!, streamOptions, options.providerResponse);
 						},
 					};
@@ -289,7 +361,7 @@ function aliasStream(
 		onTargetSelected: options.onTargetSelected ?? (() => undefined),
 		onFailover: () => undefined,
 	} as unknown as Parameters<typeof createAliasStreams>[0]);
-	return { stream: streams.stream(aliasModel(), { messages: [] }, options.streamOptions), activeTargets };
+	return { stream: streams.stream(aliasModel(), options.context ?? { messages: [] }, options.streamOptions), activeTargets };
 }
 
 async function* providerEvents(
@@ -370,6 +442,33 @@ function targetMessage(overrides: Partial<AssistantMessage> = {}): AssistantMess
 		timestamp: 123,
 		...overrides,
 	};
+}
+
+function aliasHistoryContext(aliasTarget: { api: string; provider: string; model: string }): Context {
+	const message: AssistantMessage & { aliasTarget: { api: string; provider: string; model: string } } = {
+		role: "assistant",
+		content: [
+			{ type: "thinking", thinking: "foreign thinking", thinkingSignature: "signature" },
+			{ type: "text", text: "prior answer" },
+			{ type: "toolCall", id: "call-1", name: "read", arguments: {} },
+		],
+		api: "alias-delegate",
+		provider: "alias",
+		model: "coder",
+		responseModel: aliasTarget.model,
+		aliasTarget,
+		usage: {
+			input: 1,
+			output: 1,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 2,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "toolUse",
+		timestamp: 1,
+	};
+	return { messages: [message] };
 }
 
 function aliasModel(): Model<Api> {

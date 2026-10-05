@@ -301,6 +301,71 @@ test("records the resolved target on forwarded alias messages", async () => {
 	});
 });
 
+test("maps alias history separately for each failover target", async () => {
+	const context = aliasHistoryContext({
+		api: "target-api",
+		provider: "target-provider",
+		model: "primary-model",
+	});
+	const seen: Array<[string, Context]> = [];
+	const { stream } = aliasStream(
+		{
+			"primary-model": asyncEvents({
+				type: "error",
+				reason: "error",
+				error: targetMessage({ model: "primary-model", stopReason: "error" }),
+			}),
+			"fallback-model": asyncEvents(doneEvent(targetMessage({ model: "fallback-model" }))),
+		},
+		{ context, onProviderContext: (received, modelId) => seen.push([modelId, received]) },
+	);
+
+	await collect(stream);
+
+	assert.deepEqual(
+		seen.map(([modelId]) => modelId),
+		["primary-model", "fallback-model"],
+	);
+	const primaryMessage = seen[0]![1].messages[0];
+	const fallbackMessage = seen[1]![1].messages[0];
+	if (primaryMessage?.role !== "assistant" || fallbackMessage?.role !== "assistant") {
+		assert.fail("expected assistant messages");
+	}
+	// The primary target keeps its own signature; the fallback must not receive it.
+	assert.deepEqual(
+		primaryMessage.content.map((block) => block.type),
+		["thinking", "text", "toolCall"],
+	);
+	assert.deepEqual(
+		fallbackMessage.content.map((block) => block.type),
+		["text", "toolCall"],
+	);
+	assert.equal(context.messages[0]?.content.length, 3);
+});
+
+test("maps alias history for streamSimple too", async () => {
+	const context = aliasHistoryContext({
+		api: "target-api",
+		provider: "target-provider",
+		model: "target-model",
+	});
+	const seen: Context[] = [];
+	const { stream } = aliasStream(
+		{ "target-model": asyncEvents(doneEvent(targetMessage())) },
+		{ context, kind: "streamSimple", onProviderContext: (received) => seen.push(received) },
+	);
+
+	await collect(stream);
+
+	const message = seen[0]?.messages[0];
+	if (message?.role !== "assistant") assert.fail("expected assistant message");
+	assert.equal(message.provider, "target-provider");
+	assert.deepEqual(
+		message.content.map((block) => block.type),
+		["thinking", "text", "toolCall"],
+	);
+});
+
 function streamFor(events: readonly AssistantMessageEvent[] | AsyncIterable<AssistantMessageEvent>): AssistantMessageEventStream {
 	const { stream } = aliasStream({ "target-model": events });
 	return stream;
@@ -310,7 +375,8 @@ interface AliasStreamTestOptions {
 	providerResponse?: ProviderResponse;
 	streamOptions?: StreamOptions;
 	context?: Context;
-	onProviderContext?(context: Context): void;
+	kind?: "stream" | "streamSimple";
+	onProviderContext?(context: Context, modelId: string): void;
 	log?(event: string, data?: Record<string, unknown>): void;
 	onTargetSelected?(role: string, targetRef: string): void;
 	policy?: AliasPolicy;
@@ -338,11 +404,11 @@ function aliasStream(
 				getProvider() {
 					return {
 						stream(model: Model<Api>, context: Context, streamOptions?: StreamOptions) {
-							options.onProviderContext?.(context);
+							options.onProviderContext?.(context, model.id);
 							return providerEvents(responses[model.id]!, streamOptions, options.providerResponse);
 						},
 						streamSimple(model: Model<Api>, context: Context, streamOptions?: StreamOptions) {
-							options.onProviderContext?.(context);
+							options.onProviderContext?.(context, model.id);
 							return providerEvents(responses[model.id]!, streamOptions, options.providerResponse);
 						},
 					};
@@ -361,7 +427,8 @@ function aliasStream(
 		onTargetSelected: options.onTargetSelected ?? (() => undefined),
 		onFailover: () => undefined,
 	} as unknown as Parameters<typeof createAliasStreams>[0]);
-	return { stream: streams.stream(aliasModel(), options.context ?? { messages: [] }, options.streamOptions), activeTargets };
+	const kind = options.kind ?? "stream";
+	return { stream: streams[kind](aliasModel(), options.context ?? { messages: [] }, options.streamOptions), activeTargets };
 }
 
 async function* providerEvents(
@@ -444,11 +511,14 @@ function targetMessage(overrides: Partial<AssistantMessage> = {}): AssistantMess
 	};
 }
 
-function aliasHistoryContext(aliasTarget: { api: string; provider: string; model: string }): Context {
+function aliasHistoryContext(
+	aliasTarget: { api: string; provider: string; model: string },
+	thinking = "foreign thinking",
+): Context {
 	const message: AssistantMessage & { aliasTarget: { api: string; provider: string; model: string } } = {
 		role: "assistant",
 		content: [
-			{ type: "thinking", thinking: "foreign thinking", thinkingSignature: "signature" },
+			{ type: "thinking", thinking, thinkingSignature: "signature" },
 			{ type: "text", text: "prior answer" },
 			{ type: "toolCall", id: "call-1", name: "read", arguments: {} },
 		],

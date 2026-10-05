@@ -33,6 +33,9 @@ test("drops thinking from alias history produced by a different target", () => {
 		storedMessage({ aliasTarget: { api: "openai-completions", provider: "deepseek", model: "deepseek-chat" } }),
 		storedMessage({ aliasTarget: { api: "openai-codex-responses", provider: "openai-codex", model: "gpt-5.4" } }),
 		storedMessage({ aliasTarget: { api: "openai-completions", provider: "openai-codex", model: "gpt-6.1-sol" } }),
+		// Provider-only mismatch: same api and model id, different provider (two providers
+		// can serve the same id with different signature formats).
+		storedMessage({ aliasTarget: { api: "openai-codex-responses", provider: "other-provider", model: "gpt-6.1-sol" } }),
 	];
 
 	const mapped = mapContextToTarget({ messages }, gptTarget());

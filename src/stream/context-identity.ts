@@ -33,18 +33,20 @@ interface AliasStoredMessage extends AssistantMessage {
  *   its thinking blocks and signatures replay as native reasoning.
  * - Alias history from any other target (including legacy history with no
  *   recorded target) has its thinking blocks dropped rather than converted.
+ *   If no content remains, the turn is omitted rather than forwarded empty.
  * - Every other message passes through unchanged.
  */
 export function mapContextToTarget(context: Context, target: Model<Api>): Context {
 	let changed = false;
-	const messages = context.messages.map((message) => {
-		if (message.role !== "assistant" || message.api !== ALIAS_API_ID) return message;
+	const messages = context.messages.flatMap((message): Context["messages"] => {
+		if (message.role !== "assistant" || message.api !== ALIAS_API_ID) return [message];
 		changed = true;
 		const { aliasTarget: recorded, ...rest } = message as AliasStoredMessage;
 		if (sameTarget(recorded, target)) {
-			return { ...rest, api: target.api, provider: target.provider, model: target.id };
+			return [{ ...rest, api: target.api, provider: target.provider, model: target.id }];
 		}
-		return { ...rest, content: rest.content.filter((block) => block.type !== "thinking") };
+		const content = rest.content.filter((block) => block.type !== "thinking");
+		return content.length > 0 ? [{ ...rest, content }] : [];
 	});
 	return changed ? { ...context, messages } : context;
 }

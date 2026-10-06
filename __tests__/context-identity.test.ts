@@ -125,6 +125,35 @@ test("real transformMessages replays a same-target signature as native reasoning
 	});
 });
 
+test("drops foreign and legacy thinking-only turns before real transformMessages", () => {
+	const user = { role: "user" as const, content: "continue", timestamp: 2 };
+	const foreign = storedMessage({
+		aliasTarget: { api: "openai-completions", provider: "deepseek", model: "deepseek-chat" },
+		content: [{ type: "thinking", thinking: "private reasoning", thinkingSignature: "foreign-signature" }],
+		stopReason: "stop",
+	});
+	const legacy = { ...foreign };
+	delete legacy.aliasTarget;
+	const context: Context = { messages: [foreign, legacy, user] };
+
+	const mapped = mapContextToTarget(context, gptTarget());
+
+	assert.deepEqual(mapped.messages, [user]);
+	assert.deepEqual(transformMessages(mapped.messages, gptTarget(), undefined), [user]);
+	assert.equal(foreign.content.length, 1, "stored history must not be mutated");
+	assert.equal(context.messages.length, 3);
+});
+
+test("keeps same-target thinking-only turns for native replay", () => {
+	const stored = storedMessage({
+		content: [{ type: "thinking", thinking: "", thinkingSignature: "encrypted-signature" }],
+		stopReason: "stop",
+	});
+	const mapped = mapContextToTarget({ messages: [stored] }, gptTarget());
+	assert.deepEqual(onlyAssistant(mapped).content, stored.content);
+	assert.deepEqual(transformMessages(mapped.messages, gptTarget(), undefined)[0]?.content, stored.content);
+});
+
 test("session reload keeps the recorded target fields", () => {
 	const stored = storedMessage();
 	const revived = JSON.parse(JSON.stringify(stored)) as StoredAssistantMessage;

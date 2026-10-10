@@ -47,16 +47,18 @@ function resolvePolicy(role: string, base: AliasPolicy, overrides: AliasPolicyIn
 		}
 		cooldown.baseMs = cooldown.capMs;
 	}
-	return { ...(timeouts ? { timeouts } : {}), cooldown };
+	const quotaResetCommand = overrides.quotaResetCommand ?? base.quotaResetCommand;
+	return { ...(timeouts ? { timeouts } : {}), cooldown, ...(quotaResetCommand ? { quotaResetCommand } : {}) };
 }
 
 function parseDefaultsPolicy(value: unknown): AliasPolicyInput {
 	if (value === undefined) return {};
-	const validKeys = new Set(["timeouts", "cooldown", "cooldownResetSuccesses"]);
+	const validKeys = new Set(["timeouts", "cooldown", "cooldownResetSuccesses", "quotaResetCommand"]);
 	if (!isRecord(value) || Object.keys(value).some((key) => !validKeys.has(key))) {
 		throw new Error('invalid mapping for "$defaults"');
 	}
 	const policy = parsePolicyFields("$defaults", value);
+	if (value.quotaResetCommand !== undefined) policy.quotaResetCommand = parseCommand("$defaults", value.quotaResetCommand);
 	if (value.cooldownResetSuccesses === undefined) return policy;
 	if (policy.cooldown?.resetSuccesses !== undefined) {
 		throw new Error('invalid mapping for "$defaults": set cooldown.resetSuccesses or cooldownResetSuccesses, not both');
@@ -140,6 +142,13 @@ function parseCooldown(role: string, value: unknown): Partial<CooldownPolicy> | 
 		cooldown.resetSuccesses = parseResetSuccesses(role, value.resetSuccesses);
 	}
 	return cooldown;
+}
+
+function parseCommand(role: string, value: unknown): readonly string[] {
+	if (!Array.isArray(value) || value.length === 0 || value.some((part) => typeof part !== "string" || part === "")) {
+		throw new Error(`invalid mapping for "${role}"`);
+	}
+	return value as string[];
 }
 
 function parseResetSuccesses(role: string, value: unknown): number {

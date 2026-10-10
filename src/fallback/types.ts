@@ -28,12 +28,15 @@ export interface CooldownPolicy {
 export interface AliasPolicy {
 	timeouts?: AttemptTimeouts;
 	cooldown: CooldownPolicy;
+	/** argv run with the provider id appended after a usage-limit failure; prints the reset time. */
+	quotaResetCommand?: readonly string[];
 }
 
 /** Partial policy as written in `$defaults` or an object-form alias entry. */
 export interface AliasPolicyInput {
 	timeouts?: AttemptTimeouts;
 	cooldown?: Partial<CooldownPolicy>;
+	quotaResetCommand?: readonly string[];
 }
 
 export interface AliasConfig {
@@ -127,4 +130,6 @@ export interface FallbackOptions<Event extends StreamEventLike> {
 	now?: () => number;
 	onLatency?(sample: AttemptLatencySample): void;
 	onTimeout?(target: string, reason: string): void;
+	/** Runs `policy.quotaResetCommand`; defaults to a synchronous child process. */
+	runQuotaCommand?(argv: readonly string[]): string;
 }

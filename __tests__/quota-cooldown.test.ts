@@ -4,8 +4,10 @@ import {
 	createCooldownRegistry,
 	isQuotaExhausted,
 	providerCooldownKey,
+	parseAliasConfig,
 	QUOTA_COOLDOWN_POLICY,
 	runFallbackChain,
+	runQuotaResetCommand,
 } from "../src/fallback/index.ts";
 import { renderStatusTick, type AliasSession } from "../src/status/session-status.ts";
 
@@ -116,6 +118,84 @@ test("the footer skips a provider in quota cooldown and lists it once", () => {
 	});
 
 	assert.equal(text, "other/m · cooldown: go/* 1m");
+});
+
+test("a quota failure cools the provider until the reset the quota command prints", async () => {
+	const now = Date.parse("2026-10-10T14:00:00Z");
+	const cooldowns = createCooldownRegistry(() => now);
+	const commands: string[][] = [];
+	const durations: number[] = [];
+
+	await runFallbackChain<FakeEvent>({
+		role: "role",
+		targets: ["go/a", "other/m"],
+		cooldowns,
+		now: () => now,
+		policy: { ...parseAliasConfig({ $defaults: { quotaResetCommand: ["cta", "pi", "quota-reset"] } }).policyFor("x") },
+		runQuotaCommand: (argv) => {
+			commands.push([...argv]);
+			return "2026-10-12T00:00:00Z\n";
+		},
+		open: async (target) => (target === "go/a" ? throwBeforeEvent(GO_QUOTA) : events()),
+		forward: () => undefined,
+		warn: (_target, _reason, _next, cooldown) => durations.push(cooldown.durationMs),
+	});
+
+	assert.deepEqual(commands, [["cta", "pi", "quota-reset", "go"]]);
+	assert.equal(cooldowns.state("go/*")!.nextRetryAt, Date.parse("2026-10-12T00:00:00Z"));
+	assert.deepEqual(durations, [Date.parse("2026-10-12T00:00:00Z") - now]);
+});
+
+test("an empty, unparseable or past quota command answer falls back to the built-in backoff", async () => {
+	const now = Date.parse("2026-10-10T14:00:00Z");
+	for (const answer of ["", "not a date", "2026-10-10T13:00:00Z"]) {
+		const cooldowns = createCooldownRegistry(() => now);
+		await runFallbackChain<FakeEvent>({
+			role: "role",
+			targets: ["go/a", "other/m"],
+			cooldowns,
+			now: () => now,
+			policy: { ...parseAliasConfig({ $defaults: { quotaResetCommand: ["cta"] } }).policyFor("x") },
+			runQuotaCommand: () => answer,
+			open: async (target) => (target === "go/a" ? throwBeforeEvent(GO_QUOTA) : events()),
+			forward: () => undefined,
+			warn: () => undefined,
+		});
+		assert.equal(cooldowns.state("go/*")!.nextRetryAt, now + QUOTA_COOLDOWN_POLICY.baseMs, answer);
+	}
+});
+
+test("the quota command runs only on a quota failure", async () => {
+	let runs = 0;
+	await runFallbackChain<FakeEvent>({
+		role: "role",
+		targets: ["go/a", "other/m"],
+		cooldowns: createCooldownRegistry(() => 0),
+		policy: { ...parseAliasConfig({ $defaults: { quotaResetCommand: ["cta"] } }).policyFor("x") },
+		runQuotaCommand: () => {
+			runs++;
+			return "";
+		},
+		open: async (target) => (target === "go/a" ? throwBeforeEvent("connection refused") : events()),
+		forward: () => undefined,
+		warn: () => undefined,
+	});
+	assert.equal(runs, 0);
+});
+
+test("quotaResetCommand is a $defaults-only non-empty array of strings", () => {
+	assert.deepEqual(parseAliasConfig({ $defaults: { quotaResetCommand: ["a", "b"] } }).policyFor("x").quotaResetCommand, ["a", "b"]);
+	assert.equal(parseAliasConfig({ role: "go/a" }).policyFor("role").quotaResetCommand, undefined);
+	for (const bad of [[], "cta", [1], [""]]) {
+		assert.throws(() => parseAliasConfig({ $defaults: { quotaResetCommand: bad } }), /invalid mapping for "\$defaults"/u);
+	}
+	assert.throws(() => parseAliasConfig({ role: { targets: ["go/a"], quotaResetCommand: ["a"] } }), /invalid mapping for "role"/u);
+});
+
+test("the default quota command runner returns stdout, and nothing when the command fails", () => {
+	assert.equal(runQuotaResetCommand([process.execPath, "-e", "process.stdout.write('2026-10-12T00:00:00Z')"]), "2026-10-12T00:00:00Z");
+	assert.equal(runQuotaResetCommand([process.execPath, "-e", "process.exit(3)"]), "");
+	assert.equal(runQuotaResetCommand(["/nonexistent/quota-command"]), "");
 });
 
 async function* events(): AsyncGenerator<FakeEvent> {

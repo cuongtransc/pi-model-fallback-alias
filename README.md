@@ -107,6 +107,12 @@ Use an alias anywhere Pi accepts a model reference:
   the whole provider under the shared key `<provider>/*` instead of one target:
   1 hour, doubling up to 6 hours. The provider's other targets are skipped in the
   same request. A plain `429 Request rate limited` keeps the per-target cooldown.
+- `$defaults.quotaResetCommand` (an argv array, for example
+  `["cta", "pi", "quota-reset"]`) replaces that guess with the real reset time.
+  After a usage-limit failure it runs once with the provider id appended
+  (`… opencode-go`), for at most 5 seconds, and the provider cools until the
+  ISO 8601 time it prints. Empty, unparseable or past output, or a failing
+  command, keeps the 1 to 6 hour backoff. Only `$defaults` accepts it.
 - Per-role latency limits can cover time to first event, event stalls, and the
   total pre-commit interval. A timeout is active only while another target
   remains.

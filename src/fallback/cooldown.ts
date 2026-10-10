@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import type { CooldownPolicy, CooldownRegistry, CooldownState, CooldownUpdate } from "./types.ts";
 
 export const COOLDOWN_BASE_MS = 5 * 60_000;
@@ -28,6 +29,19 @@ const QUOTA_EXHAUSTED = /usage[ _]?limit/i;
 
 export function isQuotaExhausted(reason: string): boolean {
 	return QUOTA_EXHAUSTED.test(reason);
+}
+
+/** stdout of `argv`, or "" when it cannot run, fails or exceeds 5 seconds. */
+export function runQuotaResetCommand(argv: readonly string[]): string {
+	try {
+		return execFileSync(argv[0]!, argv.slice(1), {
+			encoding: "utf8",
+			timeout: 5_000,
+			stdio: ["ignore", "pipe", "ignore"],
+		});
+	} catch {
+		return "";
+	}
 }
 
 /** Cooldown key shared by every target of one provider. */

@@ -66,3 +66,20 @@ test("prefers the linked signal over the caller's", () => {
 	assert.equal(requestOptions({ signal: caller.signal }, {}, linked.signal).signal, linked.signal);
 	assert.equal(requestOptions({ signal: caller.signal }, {}, undefined).signal, caller.signal);
 });
+
+test("adds the OpenCode session headers pi derives from the alias model, not the target", () => {
+	const opencode = { provider: "opencode-ct", baseUrl: "https://opencode.ai/zen/go/v1" };
+	const options = requestOptions<StreamOptions>({ sessionId: "sess-1", headers: { "x-extra": "1" } }, {}, undefined, opencode);
+	assert.deepEqual(options.headers, { "x-extra": "1", "x-opencode-session": "sess-1", "x-opencode-client": "pi" });
+
+	const builtIn = requestOptions<StreamOptions>({ sessionId: "sess-2" }, {}, undefined, { provider: "opencode-go", baseUrl: "https://x.invalid" });
+	assert.equal(builtIn.headers?.["x-opencode-session"], "sess-2");
+});
+
+test("adds no OpenCode session header for another provider or without a session", () => {
+	const other = { provider: "xai", baseUrl: "https://api.x.ai/v1" };
+	assert.equal(requestOptions<StreamOptions>({ sessionId: "sess-1" }, {}, undefined, other).headers, undefined);
+	const opencode = { provider: "opencode-ct", baseUrl: "https://opencode.ai/zen/go/v1" };
+	assert.equal(requestOptions<StreamOptions>({}, {}, undefined, opencode).headers, undefined);
+	assert.equal(requestOptions<StreamOptions>({ sessionId: "s" }, {}, undefined, { provider: "p", baseUrl: "not a url" }).headers, undefined);
+});

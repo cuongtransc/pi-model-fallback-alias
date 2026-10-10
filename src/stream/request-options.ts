@@ -27,14 +27,39 @@ export function requestOptions<T extends StreamOptions | SimpleStreamOptions>(
 	options: T | undefined,
 	auth: ResolvedTargetAuth,
 	signal: AbortSignal | undefined,
+	target?: TargetIdentity,
 ): T {
+	const callerHeaders = withoutCredentialHeaders(options?.headers);
 	return {
 		...options,
 		signal: signal ?? options?.signal,
 		apiKey: auth.apiKey,
-		headers: mergeHeaders(withoutCredentialHeaders(options?.headers), auth.headers),
+		headers: mergeHeaders(mergeHeaders(callerHeaders, sessionHeaders(target, options?.sessionId)), auth.headers),
 		env: { ...options?.env, ...auth.env },
 	} as T;
+}
+
+type TargetIdentity = { provider: string; baseUrl: string };
+
+/**
+ * OpenCode routes by `x-opencode-session` and rejects a request without it
+ * (400 MissingSessionID). Pi adds it only when the *requested* model is
+ * OpenCode, and the requested model here is the alias, so the target's
+ * headers are added the way pi would for that target.
+ */
+function sessionHeaders(target: TargetIdentity | undefined, sessionId: string | undefined): ProviderHeaders | undefined {
+	if (!target || !sessionId) return undefined;
+	const opencode =
+		target.provider === "opencode" || target.provider === "opencode-go" || hostOf(target.baseUrl) === "opencode.ai";
+	return opencode ? { "x-opencode-session": sessionId, "x-opencode-client": "pi" } : undefined;
+}
+
+function hostOf(baseUrl: string): string | undefined {
+	try {
+		return new URL(baseUrl).hostname;
+	} catch {
+		return undefined;
+	}
 }
 
 function isCredentialHeader(name: string): boolean {

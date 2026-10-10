@@ -165,7 +165,7 @@ function openTargetStream(
 	options: StreamOptions | SimpleStreamOptions | undefined,
 	signal: AbortSignal | undefined,
 ): AssistantMessageEventStream {
-	const request = requestOptions(options, target.auth, signal);
+	const request = requestOptions(options, target.auth, signal, target.model);
 	return kind === "streamSimple"
 		? target.provider.streamSimple(target.model, context, request as SimpleStreamOptions)
 		: target.provider.stream(target.model, context, request);

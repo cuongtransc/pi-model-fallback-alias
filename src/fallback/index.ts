@@ -27,8 +27,11 @@ export {
 	COOLDOWN_CAP_MS,
 	createCooldownRegistry,
 	DEFAULT_STATUS_REFRESH_MS,
+	isQuotaExhausted,
 	MAX_STATUS_REFRESH_MS,
 	nextCooldown,
+	providerCooldownKey,
+	QUOTA_COOLDOWN_POLICY,
 } from "./cooldown.ts";
 
 export { BUILT_IN_POLICY, parseAliasConfig } from "./config.ts";

@@ -9,6 +9,11 @@ import {
 
 const NOOP_DEBUG_LOG = { log() {} };
 
+// Cools every concrete target but no provider-wide "<provider>/*" key.
+function targetCooldown(key: string) {
+	return key.endsWith("/*") ? undefined : { failCount: 1, nextRetryAt: 61_000 };
+}
+
 function createUi(showColors = false) {
 	const statuses: Array<string | undefined> = [];
 	const ui = {
@@ -178,7 +183,7 @@ describe("renderStatusTick", () => {
 			session,
 			lastPushedText: undefined,
 			now: 1_000,
-			cooldowns: { state: () => ({ failCount: 1, nextRetryAt: 61_000 }) },
+			cooldowns: { state: targetCooldown },
 			debugLog: NOOP_DEBUG_LOG,
 		});
 
@@ -194,7 +199,7 @@ describe("renderStatusTick", () => {
 		startSession(session, createContext(true, captured.ui, {}), NOOP_DEBUG_LOG);
 		session.model = { provider: "alias", id: "fast" };
 		const aliases = new Map([["fast", ["provider/primary"]]]);
-		const cooldowns = { state: () => ({ failCount: 1, nextRetryAt: 61_000 }) };
+		const cooldowns = { state: targetCooldown };
 
 		const aliasText = renderStatusTick({
 			aliases,
@@ -235,7 +240,7 @@ describe("renderStatusTick", () => {
 			session,
 			lastPushedText: undefined,
 			now: 1_000,
-			cooldowns: { state: () => ({ failCount: 1, nextRetryAt: 61_000 }) },
+			cooldowns: { state: targetCooldown },
 			debugLog: NOOP_DEBUG_LOG,
 		});
 

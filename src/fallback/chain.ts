@@ -1,5 +1,11 @@
 import type { TimeoutKind } from "../latency/stats.ts";
-import { BUILT_IN_COOLDOWN_POLICY, createCooldownRegistry } from "./cooldown.ts";
+import {
+	BUILT_IN_COOLDOWN_POLICY,
+	createCooldownRegistry,
+	isQuotaExhausted,
+	providerCooldownKey,
+	QUOTA_COOLDOWN_POLICY,
+} from "./cooldown.ts";
 import { describeFailure, failureStopReason, formatExhaustionError, isRecord } from "./refs.ts";
 import type {
 	AttemptLatencyOutcome,
@@ -56,14 +62,16 @@ export async function runFallbackChain<Event extends StreamEventLike>(options: F
 		return;
 	}
 
-	const attempts = attemptsForRequest(options.targets, cooldowns);
+	let attempts = attemptsForRequest(options.targets, cooldowns);
 	const failures: IndexedTargetFailure[] = [];
 	for (let index = 0; index < attempts.length; index++) {
 		const attempt = attempts[index]!;
-		const nextTarget = attempts[index + 1]?.target;
-		const outcome = await attemptTarget(options, attempt.target, cooldowns, nextTarget !== undefined);
+		const outcome = await attemptTarget(options, attempt.target, cooldowns, index + 1 < attempts.length);
 		if (outcome.kind === "complete" || outcome.kind === "committed-failure") return;
 		if (outcome.kind === "unsafe-throw") throw outcome.error;
+		// An exhausted quota fails every model of the provider, so its later targets are not tried.
+		if (isQuotaExhausted(outcome.reason)) attempts = withoutLaterSameProvider(attempts, index);
+		const nextTarget = attempts[index + 1]?.target;
 
 		failures.push({
 			target: attempt.target,
@@ -124,11 +132,16 @@ function attemptsForRequest(targets: readonly string[], cooldowns: CooldownRegis
 	const attempts = targets.map((target, targetIndex) => ({
 		target,
 		targetIndex,
-		retriedFromCooldown: cooldowns.isActive(target),
+		retriedFromCooldown: cooldowns.isActive(target) || cooldowns.isActive(providerCooldownKey(target)),
 	}));
 	const available = attempts.filter((attempt) => !attempt.retriedFromCooldown);
 	if (available.length === 0) return attempts;
 	return [...available, ...attempts.filter((attempt) => attempt.retriedFromCooldown)];
+}
+
+function withoutLaterSameProvider(attempts: readonly TargetAttempt[], index: number): readonly TargetAttempt[] {
+	const provider = providerCooldownKey(attempts[index]!.target);
+	return attempts.filter((attempt, position) => position <= index || providerCooldownKey(attempt.target) !== provider);
 }
 
 function orderFailures(failures: readonly IndexedTargetFailure[]): TargetFailure[] {
@@ -150,7 +163,10 @@ function warnCooldown<Event extends StreamEventLike>(
 	nextTarget: string | undefined,
 	cooldowns: CooldownRegistry,
 ): void {
-	options.warn(target, reason, nextTarget, cooldowns.recordFailure(target, cooldownOf(options)));
+	const update = isQuotaExhausted(reason)
+		? cooldowns.recordFailure(providerCooldownKey(target), QUOTA_COOLDOWN_POLICY)
+		: cooldowns.recordFailure(target, cooldownOf(options));
+	options.warn(target, reason, nextTarget, update);
 }
 
 function cooldownOf<Event extends StreamEventLike>(options: FallbackOptions<Event>): CooldownPolicy {

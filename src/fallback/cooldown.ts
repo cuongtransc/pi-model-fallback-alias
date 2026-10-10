@@ -12,6 +12,29 @@ export const BUILT_IN_COOLDOWN_POLICY: CooldownPolicy = {
 	resetSuccesses: 1,
 };
 
+/**
+ * Cooldown for an account-wide quota: one failure means every model of that
+ * provider is out until the quota window resets, which is hours or days away.
+ */
+export const QUOTA_COOLDOWN_POLICY: CooldownPolicy = {
+	baseMs: 60 * 60_000,
+	capMs: 6 * 60 * 60_000,
+	resetSuccesses: 1,
+};
+
+// "usage limit" covers OpenCode Go's GoUsageLimitError ("Go usage limit exceeded");
+// a plain "[429] Request rate limited" is transient and stays per target.
+const QUOTA_EXHAUSTED = /usage[ _]?limit/i;
+
+export function isQuotaExhausted(reason: string): boolean {
+	return QUOTA_EXHAUSTED.test(reason);
+}
+
+/** Cooldown key shared by every target of one provider. */
+export function providerCooldownKey(target: string): string {
+	return `${target.slice(0, target.indexOf("/"))}/*`;
+}
+
 export function createCooldownRegistry(now: () => number = Date.now): CooldownRegistry {
 	const entries = new Map<string, CooldownState>();
 	return {

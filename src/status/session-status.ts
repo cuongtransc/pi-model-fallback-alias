@@ -1,5 +1,5 @@
 import type { DebugLog } from "../debug-log.ts";
-import { describeFailure, type AliasMap, type CooldownRegistry } from "../fallback/index.ts";
+import { describeFailure, providerCooldownKey, type AliasMap, type CooldownRegistry } from "../fallback/index.ts";
 import {
 	composeFooterStatus,
 	formatCooldownStatus,
@@ -108,12 +108,14 @@ function activeCooldownItems(
 	const items: CooldownStatusItem[] = [];
 	const seen = new Set<string>();
 	for (const targets of aliases.values()) {
-		for (const targetRef of targets) {
-			if (seen.has(targetRef)) continue;
-			seen.add(targetRef);
-			const state = cooldowns.state(targetRef);
-			if (state && state.nextRetryAt > now) {
-				items.push({ targetRef, remainingMs: state.nextRetryAt - now });
+		for (const target of targets) {
+			for (const targetRef of [providerCooldownKey(target), target]) {
+				if (seen.has(targetRef)) continue;
+				seen.add(targetRef);
+				const state = cooldowns.state(targetRef);
+				if (state && state.nextRetryAt > now) {
+					items.push({ targetRef, remainingMs: state.nextRetryAt - now });
+				}
 			}
 		}
 	}
@@ -138,6 +140,6 @@ function isCooling(
 	now: number,
 	cooldowns: Pick<CooldownRegistry, "state">,
 ): boolean {
-	return (cooldowns.state(targetRef)?.nextRetryAt ?? 0) > now;
+	return [targetRef, providerCooldownKey(targetRef)].some((key) => (cooldowns.state(key)?.nextRetryAt ?? 0) > now);
 }
 

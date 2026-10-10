@@ -102,6 +102,11 @@ Use an alias anywhere Pi accepts a model reference:
 - Failed concrete targets enter an exponential cooldown. State is shared by
   aliases and Pi processes. Cooled targets are skipped while alternatives
   remain and retried before final exhaustion.
+- A failure whose reason names a usage limit (for example OpenCode Go's
+  `GoUsageLimitError`) means the provider's account quota is spent, so it cools
+  the whole provider under the shared key `<provider>/*` instead of one target:
+  1 hour, doubling up to 6 hours. The provider's other targets are skipped in the
+  same request. A plain `429 Request rate limited` keeps the per-target cooldown.
 - Per-role latency limits can cover time to first event, event stalls, and the
   total pre-commit interval. A timeout is active only while another target
   remains.

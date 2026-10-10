@@ -87,6 +87,8 @@ function createFallbackStream(
 	const { policy, configLoadMs, degraded } = policyFor(aliasModel.id);
 	const metadataByTarget = new Map<string, ProviderResponseMetadata>();
 	let lastPartial: AssistantMessage | undefined;
+	// Attempts run one at a time, so forwarded events belong to the target opened last.
+	let chainIndex = -1;
 
 	void runFallbackChain({
 		role: aliasModel.id,
@@ -108,6 +110,7 @@ function createFallbackStream(
 					linkedSignal(options?.signal, attemptSignal),
 				);
 				session.activeTargets.set(aliasModel.id, targetRef);
+				chainIndex = targets.indexOf(targetRef);
 				onTargetSelected(aliasModel.id, targetRef);
 				debugLog.log("open-attempt", { role: aliasModel.id, targetRef, ok: true });
 				return stream;
@@ -122,7 +125,7 @@ function createFallbackStream(
 			}
 		},
 		forward: (event) => {
-			const forwarded = withAliasIdentity(event, aliasModel);
+			const forwarded = withAliasIdentity(event, aliasModel, chainIndex);
 			lastPartial = partialFrom(forwarded) ?? lastPartial;
 			output.push(forwarded);
 		},
@@ -212,19 +215,19 @@ function linkedSignal(userSignal: AbortSignal | undefined, attemptSignal: AbortS
 	return AbortSignal.any([userSignal, attemptSignal]);
 }
 
-function withAliasIdentity(event: AssistantMessageEvent, aliasModel: Model<Api>): AssistantMessageEvent {
+function withAliasIdentity(event: AssistantMessageEvent, aliasModel: Model<Api>, chainIndex: number): AssistantMessageEvent {
 	if (event.type === "done") {
-		return { ...event, message: withAliasMessageIdentity(event.message, aliasModel) };
+		return { ...event, message: withAliasMessageIdentity(event.message, aliasModel, chainIndex) };
 	}
 	if (event.type === "error") {
-		return { ...event, error: withAliasMessageIdentity(event.error, aliasModel) };
+		return { ...event, error: withAliasMessageIdentity(event.error, aliasModel, chainIndex) };
 	}
-	return { ...event, partial: withAliasMessageIdentity(event.partial, aliasModel) };
+	return { ...event, partial: withAliasMessageIdentity(event.partial, aliasModel, chainIndex) };
 }
 
 type AliasIdentityMessage = AssistantMessage & { aliasTarget: AliasTargetIdentity };
 
-function withAliasMessageIdentity(message: AssistantMessage, aliasModel: Model<Api>): AliasIdentityMessage {
+function withAliasMessageIdentity(message: AssistantMessage, aliasModel: Model<Api>, chainIndex: number): AliasIdentityMessage {
 	return {
 		...message,
 		api: aliasModel.api,
@@ -235,6 +238,7 @@ function withAliasMessageIdentity(message: AssistantMessage, aliasModel: Model<A
 			api: message.api,
 			provider: message.provider,
 			model: message.model,
+			...(chainIndex >= 0 ? { chainIndex } : {}),
 		},
 	};
 }

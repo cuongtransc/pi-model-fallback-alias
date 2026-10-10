@@ -292,13 +292,26 @@ test("records the resolved target on forwarded alias messages", async () => {
 	const events = await collect(stream);
 
 	const done = doneOf(events[0]!) as AssistantMessage & {
-		aliasTarget?: { api: string; provider: string; model: string };
+		aliasTarget?: { api: string; provider: string; model: string; chainIndex?: number };
 	};
 	assert.deepEqual(done.aliasTarget, {
 		api: "target-api",
 		provider: "target-provider",
 		model: "target-model",
+		chainIndex: 0,
 	});
+});
+
+test("records where in the alias chain the serving target sits", async () => {
+	const { stream } = aliasStream({
+		"primary-model": asyncEvents({ type: "error", reason: "error", error: targetMessage({ stopReason: "error" }) }),
+		"fallback-model": asyncEvents(doneEvent(targetMessage({ model: "fallback-model" }))),
+	});
+
+	const events = await collect(stream);
+
+	const done = doneOf(events[0]!) as AssistantMessage & { aliasTarget?: { chainIndex?: number } };
+	assert.equal(done.aliasTarget?.chainIndex, 1);
 });
 
 test("maps alias history separately for each failover target", async () => {

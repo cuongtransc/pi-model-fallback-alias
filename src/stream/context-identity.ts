@@ -13,6 +13,8 @@ export interface AliasTargetIdentity {
 	api: string;
 	provider: string;
 	model: string;
+	/** Position of the serving target in the alias chain: 0 is the first choice, more is a fallback. */
+	chainIndex?: number;
 }
 
 interface AliasStoredMessage extends AssistantMessage {

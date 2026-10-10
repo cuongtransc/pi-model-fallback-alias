@@ -107,7 +107,9 @@ Use an alias anywhere Pi accepts a model reference:
   remains.
 - The alias model mirrors the selected target's context window, output limit,
   and cost. Assistant messages preserve the logical alias identity while
-  `responseModel` records the concrete model.
+  `responseModel` records the concrete model. `aliasTarget` records the target
+  that served the turn (`api`, `provider`, `model`) and its `chainIndex` in the
+  flattened chain: `0` is the first choice, a higher index is a fallback.
 - `/model-alias-reset-cooldown` clears shared cooldown state.
 - `/model-alias-targets [role]` renders all flattened fallback chains, or one selected
   role, in the transcript.

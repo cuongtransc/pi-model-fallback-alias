@@ -32,6 +32,7 @@ export {
 	nextCooldown,
 	providerCooldownKey,
 	QUOTA_COOLDOWN_POLICY,
+	runQuotaResetCommand,
 } from "./cooldown.ts";
 
 export { BUILT_IN_POLICY, parseAliasConfig } from "./config.ts";

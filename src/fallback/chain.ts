@@ -5,6 +5,7 @@ import {
 	isQuotaExhausted,
 	providerCooldownKey,
 	QUOTA_COOLDOWN_POLICY,
+	runQuotaResetCommand,
 } from "./cooldown.ts";
 import { describeFailure, failureStopReason, formatExhaustionError, isRecord } from "./refs.ts";
 import type {
@@ -164,9 +165,20 @@ function warnCooldown<Event extends StreamEventLike>(
 	cooldowns: CooldownRegistry,
 ): void {
 	const update = isQuotaExhausted(reason)
-		? cooldowns.recordFailure(providerCooldownKey(target), QUOTA_COOLDOWN_POLICY)
+		? cooldowns.recordFailure(providerCooldownKey(target), quotaCooldownOf(options, target))
 		: cooldowns.recordFailure(target, cooldownOf(options));
 	options.warn(target, reason, nextTarget, update);
+}
+
+/** Until the reset the quota command prints, else the built-in quota backoff. */
+function quotaCooldownOf<Event extends StreamEventLike>(options: FallbackOptions<Event>, target: string): CooldownPolicy {
+	const command = options.policy?.quotaResetCommand;
+	if (!command) return QUOTA_COOLDOWN_POLICY;
+	const run = options.runQuotaCommand ?? runQuotaResetCommand;
+	const resetAt = Date.parse(run([...command, target.slice(0, target.indexOf("/"))]).trim());
+	const untilReset = resetAt - (options.now ?? Date.now)();
+	if (!(untilReset > 0)) return QUOTA_COOLDOWN_POLICY;
+	return { baseMs: untilReset, capMs: untilReset, resetSuccesses: 1 };
 }
 
 function cooldownOf<Event extends StreamEventLike>(options: FallbackOptions<Event>): CooldownPolicy {

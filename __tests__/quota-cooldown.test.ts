@@ -14,10 +14,13 @@ import { renderStatusTick, type AliasSession } from "../src/status/session-statu
 type FakeEvent = { type: "text_start" } | { type: "done"; message?: string };
 
 const GO_QUOTA = '429: {"type":"GoUsageLimitError","message":"Go usage limit exceeded"}';
+// OpenCode once both the Go month and the paid credits are spent (seen 2026-10-13).
+const NO_CREDITS = '402: {"type":"server_error","message":"Upstream request failed: Insufficient account funds"}';
 const HOUR_MS = 60 * 60_000;
 
 test("recognises account-wide quota exhaustion and leaves transient rate limits alone", () => {
 	assert.equal(isQuotaExhausted(GO_QUOTA), true);
+	assert.equal(isQuotaExhausted(NO_CREDITS), true);
 	assert.equal(isQuotaExhausted("You've hit your usage limit. Try again later."), true);
 	assert.equal(isQuotaExhausted("Streaming response failed: [429] Request rate limited"), false);
 	assert.equal(isQuotaExhausted("latency timeout: no commit within 120000ms"), false);

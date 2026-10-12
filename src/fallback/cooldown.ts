@@ -24,8 +24,9 @@ export const QUOTA_COOLDOWN_POLICY: CooldownPolicy = {
 };
 
 // "usage limit" covers OpenCode Go's GoUsageLimitError ("Go usage limit exceeded");
+// "insufficient account funds" is OpenCode's 402 once paid credits are spent too;
 // a plain "[429] Request rate limited" is transient and stays per target.
-const QUOTA_EXHAUSTED = /usage[ _]?limit/i;
+const QUOTA_EXHAUSTED = /usage[ _]?limit|insufficient account funds/i;
 
 export function isQuotaExhausted(reason: string): boolean {
 	return QUOTA_EXHAUSTED.test(reason);

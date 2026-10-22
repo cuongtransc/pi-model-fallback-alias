@@ -57,3 +57,31 @@ test("quota text wins over an account status", () => {
 test("account cooldown backs off from one hour to six", () => {
 	assert.deepEqual(ACCOUNT_COOLDOWN_POLICY, { baseMs: 3_600_000, capMs: 21_600_000, resetSuccesses: 1 });
 });
+
+// pi's getApiKeyAndHeaders returns the refresh cause's message; these shapes come from
+// pi-ai's OAuth refresh code, undici, AbortSignal.timeout and proper-lockfile on auth.json.
+const UNAVAILABLE = 'Model alias "r" target "acct/a" is unavailable: ';
+
+test("an offline refresh (fetch failed) is transient", () => {
+	assert.equal(classifyFailure(`${UNAVAILABLE}fetch failed`), "transient");
+	assert.equal(classifyFailure(`${UNAVAILABLE}OpenAI Codex token refresh error: fetch failed`), "transient");
+});
+
+test("a refresh that hits the 15 s timeout is transient", () => {
+	assert.equal(classifyFailure(`${UNAVAILABLE}The operation was aborted due to timeout`), "transient");
+	assert.equal(classifyFailure(`${UNAVAILABLE}Kimi Code token refresh aborted`), "transient");
+	assert.equal(classifyFailure(`${UNAVAILABLE}Login cancelled`), "transient"); // xAI refresh on an aborted signal
+});
+
+test("a network errno during refresh is transient", () => {
+	for (const code of ["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN"]) {
+		const reason = `${UNAVAILABLE}Anthropic token refresh request failed. url=https://x/token; details=TypeError: fetch; cause=Error: connect ${code} 1.2.3.4:443; code=${code}`;
+		assert.equal(classifyFailure(reason), "transient", code);
+	}
+});
+
+test("a held auth.json lock during refresh is transient", () => {
+	assert.equal(classifyFailure(`${UNAVAILABLE}Lock file is already being held`), "transient");
+	assert.equal(classifyFailure(`${UNAVAILABLE}Unable to update lock within the stale threshold`), "transient");
+	assert.equal(classifyFailure(`${UNAVAILABLE}Auth storage lock was compromised`), "transient");
+});

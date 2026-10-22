@@ -43,6 +43,11 @@ test("5xx and 429 never classify as account", () => {
 	for (const reason of TRANSIENT) assert.equal(classifyFailure(reason), "transient", reason);
 	assert.equal(classifyFailure("No API key for provider: acct", 503), "transient");
 	assert.equal(classifyFailure("invalid_grant", 429), "transient");
+	assert.equal(
+		classifyFailure('Model alias "r" target "acct/a" is unavailable: token refresh failed: {"error":"temporarily unavailable"}'),
+		"transient",
+	);
+	assert.equal(classifyFailure('invalid_grant: {"message":"Request rate limited"}'), "transient");
 });
 
 test("quota text wins over an account status", () => {

@@ -37,7 +37,8 @@ export type FailureClass = "quota" | "account" | "transient";
 // a plain "[429] Request rate limited" is transient and stays per target.
 const QUOTA_EXHAUSTED =
 	/usage[ _]?limit|insufficient account funds|credit balance is too low|run out of credits/i;
-const TRANSIENT_STATUS = /\b(5\d\d|429)\b|temporarily unavailable|rate limited/i;
+const TRANSIENT_STATUS = /\b(5\d\d|429)\b/;
+const TRANSIENT_TEXT = /temporarily unavailable|rate limited/i;
 const ACCOUNT_DEAD = /is unavailable: |invalidated oauth token|invalid_grant|no api key/i;
 
 /**
@@ -47,7 +48,7 @@ const ACCOUNT_DEAD = /is unavailable: |invalidated oauth token|invalid_grant|no 
 export function classifyFailure(reason: string, httpStatus?: number): FailureClass {
 	if (QUOTA_EXHAUSTED.test(reason)) return "quota";
 	const head = reason.split("{", 1)[0]!;
-	if (httpStatus === 429 || (httpStatus !== undefined && httpStatus >= 500) || TRANSIENT_STATUS.test(head)) {
+	if (httpStatus === 429 || (httpStatus !== undefined && httpStatus >= 500) || TRANSIENT_STATUS.test(head) || TRANSIENT_TEXT.test(reason)) {
 		return "transient";
 	}
 	if (httpStatus === 401 || ACCOUNT_DEAD.test(reason)) return "account";

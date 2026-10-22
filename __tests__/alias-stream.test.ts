@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import type {
 	Api,
@@ -11,7 +14,7 @@ import type {
 	StreamOptions,
 } from "@earendil-works/pi-ai";
 import { createAliasStreams } from "../src/stream/alias-stream.ts";
-import { BUILT_IN_COOLDOWN_POLICY, createCooldownRegistry, type AliasPolicy } from "../src/fallback/index.ts";
+import { BUILT_IN_COOLDOWN_POLICY, createCooldownRegistry, type AliasPolicy, type CooldownRegistry, type FailoverEntryData } from "../src/fallback/index.ts";
 
 test("rewrites partial and done identities without mutating target messages", async () => {
 	const partial = targetMessage({ responseModel: "reported-model" });
@@ -384,6 +387,45 @@ function streamFor(events: readonly AssistantMessageEvent[] | AsyncIterable<Assi
 	return stream;
 }
 
+test("a target without credentials is skipped until a login, then serves first", async () => {
+	const agentDir = mkdtempSync(join(tmpdir(), "alias-"));
+	writeFileSync(join(agentDir, "auth.json"), "{}");
+	const cooldowns = createCooldownRegistry();
+	const failovers: FailoverEntryData[] = [];
+	const selected: string[] = [];
+	let loggedIn = false;
+	const run = () =>
+		collect(
+			aliasStream(
+				{
+					"dead-model": asyncEvents(doneEvent(targetMessage({ model: "dead-model" }))),
+					"live-model": asyncEvents(doneEvent(targetMessage({ model: "live-model" }))),
+				},
+				{
+					targetRefs: ["acct/dead-model", "other/live-model"],
+					agentDir,
+					cooldowns,
+					onFailover: (data) => failovers.push(data),
+					onTargetSelected: (_role, targetRef) => selected.push(targetRef),
+					auth: (model) =>
+						model.id === "dead-model" && !loggedIn ? { ok: false, error: "No API key for provider: acct" } : { ok: true },
+				},
+			).stream,
+		);
+
+	await run();
+	assert.deepEqual(selected, ["other/live-model"]);
+	assert.equal(cooldowns.state("acct/*")!.credential, "none");
+	assert.equal(failovers[0]!.failureClass, "account");
+
+	writeFileSync(join(agentDir, "auth.json"), JSON.stringify({ acct: { type: "api_key", key: "k" } }));
+	loggedIn = true;
+	selected.length = 0;
+	await run();
+	assert.deepEqual(selected, ["acct/dead-model"]);
+	assert.equal(cooldowns.state("acct/*"), undefined);
+});
+
 interface AliasStreamTestOptions {
 	providerResponse?: ProviderResponse;
 	streamOptions?: StreamOptions;
@@ -395,6 +437,11 @@ interface AliasStreamTestOptions {
 	policy?: AliasPolicy;
 	configLoadMs?: number;
 	policyLoad?(): { policy: AliasPolicy; configLoadMs: number; degraded: boolean };
+	targetRefs?: string[];
+	agentDir?: string;
+	cooldowns?: CooldownRegistry;
+	onFailover?(data: FailoverEntryData): void;
+	auth?(model: Model<Api>): { ok: boolean; error?: string };
 }
 
 function aliasStream(
@@ -406,7 +453,7 @@ function aliasStream(
 } {
 	const activeTargets = new Map<string, string>();
 	const streams = createAliasStreams({
-		aliases: new Map([["coder", Object.keys(responses).map((model) => `target/${model}`)]]),
+		aliases: new Map([["coder", options.targetRefs ?? Object.keys(responses).map((model) => `target/${model}`)]]),
 		policyFor: options.policyLoad ?? (() => ({ policy: options.policy ?? { cooldown: BUILT_IN_COOLDOWN_POLICY }, configLoadMs: options.configLoadMs ?? 0, degraded: false })),
 		aliasModels: [aliasModel()],
 		session: {
@@ -426,8 +473,8 @@ function aliasStream(
 						},
 					};
 				},
-				async getApiKeyAndHeaders() {
-					return { ok: true };
+				async getApiKeyAndHeaders(model: Model<Api>) {
+					return options.auth?.(model) ?? { ok: true };
 				},
 			},
 			ui: undefined,
@@ -435,10 +482,11 @@ function aliasStream(
 			model: undefined,
 			activeTargets,
 		},
-		cooldowns: createCooldownRegistry(),
+		agentDir: options.agentDir ?? "/nonexistent",
+		cooldowns: options.cooldowns ?? createCooldownRegistry(),
 		debugLog: { log: options.log ?? (() => undefined) },
 		onTargetSelected: options.onTargetSelected ?? (() => undefined),
-		onFailover: () => undefined,
+		onFailover: options.onFailover ?? (() => undefined),
 	} as unknown as Parameters<typeof createAliasStreams>[0]);
 	const kind = options.kind ?? "stream";
 	return { stream: streams[kind](aliasModel(), options.context ?? { messages: [] }, options.streamOptions), activeTargets };

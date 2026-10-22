@@ -113,6 +113,14 @@ Use an alias anywhere Pi accepts a model reference:
   (`… opencode-go`), for at most 5 seconds, and the provider cools until the
   ISO 8601 time it prints. Empty, unparseable or past output, or a failing
   command, keeps the 1 to 6 hour backoff. Only `$defaults` accepts it.
+- An account failure (missing key, rejected OAuth refresh, HTTP 401,
+  `invalid_grant`) cools `<provider>/*` the same way: 1 hour, doubling up to
+  6 hours, with the provider's other targets skipped in the same request. The
+  first request after `/login` changes the provider's credential clears the
+  cooldown. The credential is the fingerprint of its `auth.json` entry without
+  `access`/`expires`, plus its `models.json` `apiKey` text. A key that a
+  `!command` decrypts from a replaced file is picked up when the backoff ends or
+  by `/model-alias-reset-cooldown`.
 - Per-role latency limits can cover time to first event, event stalls, and the
   total pre-commit interval. A timeout is active only while another target
   remains.

@@ -1,3 +1,4 @@
+import type { FailureClass } from "./cooldown.ts";
 import type { LatencyOutcome, LatencySample, ProviderResponseMetadata } from "../latency/stats.ts";
 
 export type AliasMap = ReadonlyMap<string, readonly string[]>;
@@ -67,6 +68,7 @@ export interface FailoverEntryData extends Partial<ProviderResponseMetadata> {
 	cooldownMs: number;
 	failCount: number;
 	timestamp: number;
+	failureClass?: FailureClass;
 }
 
 export interface CooldownState {

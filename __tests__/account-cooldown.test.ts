@@ -177,3 +177,14 @@ test("a timeout stays per-target even when a stale 401 is recorded", async () =>
 async function* hang(): AsyncGenerator<FakeEvent> {
 	await new Promise<void>(() => undefined);
 }
+
+test("a credential that reads as none never clears an account cooldown", async () => {
+	const cooldowns = createCooldownRegistry(() => 0);
+	const credential = { value: "aaaaaaaaaaaaaaaa" };
+	await chain(cooldowns, credential, [], () => true);
+	credential.value = "none";
+	const opened: string[] = [];
+	await chain(cooldowns, credential, opened, () => true);
+	assert.deepEqual(opened, ["other/m"]);
+	assert.equal(cooldowns.state("acct/*")!.credential, "aaaaaaaaaaaaaaaa");
+});

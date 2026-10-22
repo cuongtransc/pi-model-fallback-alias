@@ -1,5 +1,5 @@
 import { createProvider } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { MAP_PATH, createPolicyLoader, loadAliasConfig } from "./src/alias-config.ts";
 import { aliasModel, initializeAliasMetadata } from "./src/alias/alias-model.ts";
 import { createAliasStreams } from "./src/stream/alias-stream.ts";
@@ -105,6 +105,7 @@ export function installPiModelAlias(pi: ExtensionAPI, dependencies: PiModelAlias
 		policyFor,
 		aliasModels,
 		session,
+		agentDir: getAgentDir(),
 		cooldowns: targetCooldowns,
 		debugLog,
 		timers: dependencies.timers,

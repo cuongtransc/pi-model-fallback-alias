@@ -99,7 +99,7 @@ function clearReplacedCredentials<Event extends StreamEventLike>(options: Fallba
 		checked.add(key);
 		const stored = cooldowns.state(key)?.credential;
 		const current = stored === undefined ? undefined : options.credentialOf(target);
-		if (current !== undefined && current !== stored) cooldowns.clear(key);
+		if (current !== undefined && current !== "none" && current !== stored) cooldowns.clear(key);
 	}
 }
 

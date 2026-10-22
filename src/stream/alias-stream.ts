@@ -17,6 +17,7 @@ import type { PolicyLoad } from "../alias-config.ts";
 import { mirrorTargetMetadata, targetsFor, ZERO_COST } from "../alias/alias-model.ts";
 import type { DebugLog } from "../debug-log.ts";
 import {
+	classifyFailure,
 	describeFailure,
 	failureStopReason,
 	runFallbackChain,
@@ -28,6 +29,7 @@ import { requestOptions, type ResolvedTargetAuth } from "./request-options.ts";
 import { mapContextToTarget, type AliasTargetIdentity } from "./context-identity.ts";
 import type { ProviderResponseMetadata } from "../latency/stats.ts";
 import type { AliasSession } from "../status/session-status.ts";
+import { credentialFingerprint } from "./credential-fingerprint.ts";
 import { resolveAuthenticatedTarget } from "./target-auth.ts";
 
 type Registry = ExtensionContext["modelRegistry"];
@@ -40,6 +42,7 @@ interface AliasStreamDependencies {
 	policyFor(role: string): PolicyLoad;
 	aliasModels: Model<Api>[];
 	session: AliasSession<Registry, ExtensionContext["ui"]>;
+	agentDir: string;
 	cooldowns: CooldownRegistry;
 	debugLog: DebugLog;
 	onTargetSelected(role: string, targetRef: string): void;
@@ -70,6 +73,7 @@ function createFallbackStream(
 		policyFor,
 		aliasModels,
 		session,
+		agentDir,
 		cooldowns,
 		debugLog,
 		onTargetSelected,
@@ -96,6 +100,8 @@ function createFallbackStream(
 		cooldowns,
 		policy,
 		timers: dependencies.timers,
+		credentialOf: (target) => credentialFingerprint(target.slice(0, target.indexOf("/")), agentDir),
+		failureStatus: (target) => metadataByTarget.get(target)?.httpStatus,
 		signal: options?.signal,
 		open: async (targetRef, attemptSignal) => {
 			try {
@@ -148,6 +154,7 @@ function createFallbackStream(
 				cooldownMs: cooldown.durationMs,
 				failCount: cooldown.failCount,
 				timestamp: Date.now(),
+				failureClass: classifyFailure(reason, metadataByTarget.get(failedTarget)?.httpStatus),
 				...metadataByTarget.get(failedTarget),
 			}),
 		// Pi treats a restart as a second assistant message, so safe prefixes stay hidden until commit.

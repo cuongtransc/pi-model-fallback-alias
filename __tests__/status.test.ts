@@ -116,3 +116,21 @@ test("defaults invalid or missing durations to zero seconds", () => {
 test("formats durations in minutes from one minute", () => {
 	assert.equal(formatDuration(120_000), "2m");
 });
+
+test("an account failure tells the user a new login brings the provider back", () => {
+	const text = formatFailoverWarning({
+		role: "r",
+		failedTarget: "acct/a",
+		reason: "No API key for provider: acct",
+		nextTarget: "other/m",
+		cooldownMs: 3_600_000,
+		failCount: 1,
+		failureClass: "account",
+	});
+	assert.match(text, /acct\/\* skipped until a new login or the cooldown ends$/);
+});
+
+test("other failures keep the existing wording", () => {
+	const text = formatFailoverWarning({ role: "r", failedTarget: "acct/a", reason: "x", nextTarget: "other/m", cooldownMs: 1, failCount: 1, failureClass: "transient" });
+	assert.doesNotMatch(text, /new login/);
+});

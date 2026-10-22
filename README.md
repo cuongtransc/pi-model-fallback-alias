@@ -113,6 +113,19 @@ Use an alias anywhere Pi accepts a model reference:
   (`… opencode-go`), for at most 5 seconds, and the provider cools until the
   ISO 8601 time it prints. Empty, unparseable or past output, or a failing
   command, keeps the 1 to 6 hour backoff. Only `$defaults` accepts it.
+- An account failure (missing key, rejected OAuth refresh, HTTP 401,
+  `invalid_grant`) cools `<provider>/*` the same way: 1 hour, doubling up to
+  6 hours, with the provider's other targets skipped in the same request. The
+  first request after `/login` changes the provider's credential clears the
+  cooldown. The credential is a hash of what pi would use, in pi's order: the
+  `auth.json` entry without `access`/`expires`, else the `models.json` `apiKey`
+  text plus the values of the env vars it names (`$NAME`, `${NAME}`), else the
+  provider's env key (for example `XAI_API_KEY`). Only the hash is stored. A
+  provider with none of these is never cleared this way. A key that a
+  `!command` decrypts from a replaced file is picked up when the backoff ends or
+  by `/model-alias-reset-cooldown`. A refresh that fails offline, times out or
+  meets another pi process's lock on `auth.json` is a transient failure, not an
+  account failure.
 - Per-role latency limits can cover time to first event, event stalls, and the
   total pre-commit interval. A timeout is active only while another target
   remains.
@@ -123,7 +136,8 @@ Use an alias anywhere Pi accepts a model reference:
   flattened chain: `0` is the first choice, a higher index is a fallback.
 - `/model-alias-reset-cooldown` clears shared cooldown state.
 - `/model-alias-targets [role]` renders all flattened fallback chains, or one selected
-  role, in the transcript.
+  role, in the transcript. A target whose provider is cooled for a dead account
+  is marked `[account — /login <provider> to resume]`.
 - `/model-alias-latency-report [role]` renders attempt statistics in the transcript.
 
 ## State and logs

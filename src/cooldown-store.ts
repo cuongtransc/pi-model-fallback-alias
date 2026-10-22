@@ -51,12 +51,16 @@ export function createSharedCooldownRegistry(options: SharedCooldownOptions = {}
 			const entry = store.entries()[target];
 			return entry !== undefined && entry.nextRetryAt > store.now();
 		},
-		recordFailure(target, cooldown?: CooldownPolicy) {
+		recordFailure(target, cooldown?: CooldownPolicy, credential?: string) {
 			const now = store.now();
 			store.prepareWrite();
 			const entries = store.reload();
 			const update = nextCooldown(entries[target], now, cooldown);
-			entries[target] = { failCount: update.failCount, nextRetryAt: update.nextRetryAt };
+			entries[target] = {
+				failCount: update.failCount,
+				nextRetryAt: update.nextRetryAt,
+				...(credential === undefined ? {} : { credential }),
+			};
 			store.write(entries, now);
 			store.log("cooldown-record", { targetRef: target, ...update });
 			return update;
@@ -83,8 +87,21 @@ export function createSharedCooldownRegistry(options: SharedCooldownOptions = {}
 			const entry = entries[target];
 			if (!entry || entry.successCount === undefined) return;
 			store.prepareWrite();
-			entries[target] = { failCount: entry.failCount, nextRetryAt: entry.nextRetryAt };
+			const { successCount: _dropped, ...rest } = entry;
+			entries[target] = rest;
 			store.write(entries, store.now());
+		},
+		clear(target, expectedCredential) {
+			const entries = store.reload();
+			const entry = entries[target];
+			if (!entry) return false;
+			if (expectedCredential !== undefined && entry.credential !== expectedCredential) return false;
+			store.prepareWrite();
+			delete entries[target];
+			store.write(entries, store.now());
+			const reason = expectedCredential === undefined ? {} : { reason: "credential-changed" };
+			store.log("cooldown-clear", { targetRef: target, ...reason });
+			return true;
 		},
 		clearAll() {
 			const entries = store.reload();
@@ -205,6 +222,7 @@ function isCooldownState(value: unknown): value is CooldownState {
 	if (value.successCount !== undefined && (typeof value.successCount !== "number" || !Number.isFinite(value.successCount))) {
 		return false;
 	}
+	if (value.credential !== undefined && typeof value.credential !== "string") return false;
 	return (
 		typeof value.failCount === "number" &&
 		Number.isFinite(value.failCount) &&

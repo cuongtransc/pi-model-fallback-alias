@@ -237,3 +237,59 @@ test("clearAll on an empty store returns zero without writing", () => {
 
 	assert.equal(fs.files.has(STATE_PATH), false);
 });
+
+test("persists the credential and clears an entry for other processes", () => {
+	const fs = new FakeCooldownFs();
+	const logged: Array<[string, unknown]> = [];
+	const debugLog = { log: (event: string, data?: Record<string, unknown>) => logged.push([event, data]) };
+	const first = createSharedCooldownRegistry({ dir: "/fake/logs", fs, now: () => 0, debugLog });
+	first.recordFailure("acct/*", undefined, "aaaaaaaaaaaaaaaa");
+	const second = createSharedCooldownRegistry({ dir: "/fake/logs", fs, now: () => 0 });
+	assert.equal(second.state("acct/*")!.credential, "aaaaaaaaaaaaaaaa");
+	assert.equal(second.clear("acct/*"), true);
+	assert.equal(first.state("acct/*"), undefined);
+	assert.equal(first.clear("acct/*"), false);
+	assert.equal(logged.filter(([event]) => event === "cooldown-clear").length, 0); // second had no log
+	first.recordFailure("acct/*", undefined, "b");
+	first.clear("acct/*");
+	assert.deepEqual(logged.at(-1), ["cooldown-clear", { targetRef: "acct/*" }]);
+	first.recordFailure("acct/*", undefined, "b");
+	first.clear("acct/*", "b");
+	assert.deepEqual(logged.at(-1), ["cooldown-clear", { targetRef: "acct/*", reason: "credential-changed" }]);
+});
+
+test("a clear for a stale credential keeps an entry another process re-recorded", () => {
+	const fs = new FakeCooldownFs();
+	const first = createSharedCooldownRegistry({ dir: "/fake/logs", fs, now: () => 0 });
+	const second = createSharedCooldownRegistry({ dir: "/fake/logs", fs, now: () => 0 });
+	first.recordFailure("acct/*", undefined, "aaaaaaaaaaaaaaaa");
+	const stale = first.state("acct/*")!.credential;
+	second.recordFailure("acct/*", undefined, "bbbbbbbbbbbbbbbb");
+	assert.equal(first.clear("acct/*", stale), false);
+	assert.equal(first.state("acct/*")!.credential, "bbbbbbbbbbbbbbbb");
+	assert.equal(second.state("acct/*")!.credential, "bbbbbbbbbbbbbbbb");
+});
+
+test("a state file written before credentials existed still loads", () => {
+	const fs = new FakeCooldownFs();
+	fs.seed(JSON.stringify({ "acct/*": { failCount: 1, nextRetryAt: 10 } }));
+	const registry = createSharedCooldownRegistry({ dir: "/fake/logs", fs, now: () => 0 });
+	assert.deepEqual(registry.state("acct/*"), { failCount: 1, nextRetryAt: 10 });
+});
+
+test("an entry with a non-string credential is dropped on load", () => {
+	const fs = new FakeCooldownFs();
+	fs.seed(JSON.stringify({ "acct/*": { failCount: 1, nextRetryAt: 10, credential: 5 } }));
+	const registry = createSharedCooldownRegistry({ dir: "/fake/logs", fs, now: () => 0 });
+	assert.equal(registry.state("acct/*"), undefined);
+});
+
+test("success bookkeeping keeps the persisted credential", () => {
+	const fs = new FakeCooldownFs();
+	const registry = createSharedCooldownRegistry({ dir: "/fake/logs", fs, now: () => 0 });
+	registry.recordFailure("acct/*", undefined, "aaaaaaaaaaaaaaaa");
+	registry.recordSuccess("acct/*", 2);
+	assert.equal(registry.state("acct/*")!.credential, "aaaaaaaaaaaaaaaa");
+	registry.resetSuccesses("acct/*");
+	assert.equal(registry.state("acct/*")!.credential, "aaaaaaaaaaaaaaaa");
+});

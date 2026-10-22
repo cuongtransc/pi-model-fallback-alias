@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { Model, Provider } from "@earendil-works/pi-ai";
 import { installPiModelAlias } from "../index.ts";
-import { parseAliasConfig } from "../src/fallback/index.ts";
+import { ACCOUNT_COOLDOWN_POLICY, createCooldownRegistry, parseAliasConfig } from "../src/fallback/index.ts";
 import { ALIAS_TARGETS_ENTRY, LATENCY_REPORT_ENTRY, RESET_ENTRY } from "../src/status/transcript.ts";
 
 test("registers aliases and handles commands through the extension API", async () => {
@@ -42,6 +42,27 @@ test("registers aliases and handles commands through the extension API", async (
 	assert.deepEqual(entries.map((entry) => entry.type), [ALIAS_TARGETS_ENTRY, LATENCY_REPORT_ENTRY, RESET_ENTRY]);
 });
 
+test("/model-alias-targets labels a provider cooled for its account", async () => {
+	const commands = new Map<string, { handler: (args?: string) => Promise<void> }>();
+	const entries: Array<{ type: string; data: unknown }> = [];
+	const registryCooldowns = createCooldownRegistry();
+	registryCooldowns.recordFailure("provider/*", ACCOUNT_COOLDOWN_POLICY, "aaaaaaaaaaaaaaaa");
+	const pi = {
+		appendEntry(type: string, data: unknown) { entries.push({ type, data }); },
+		registerEntryRenderer() {},
+		registerProvider() {},
+		on() {},
+		registerCommand(name: string, command: { handler: (args?: string) => Promise<void> }) { commands.set(name, command); },
+	};
+	installPiModelAlias(pi as never, {
+		aliasConfig: parseAliasConfig({ coder: "provider/target" }),
+		debugLog: { log() {} },
+		cooldowns: registryCooldowns,
+	});
+	await commands.get("model-alias-targets")?.handler("coder");
+	assert.deepEqual((entries[0]!.data as { accountProviders?: string[] }).accountProviders, ["provider"]);
+});
+
 function targetModel(): Model<"test"> {
 	return {
 		id: "target", name: "Target", api: "test", provider: "provider", baseUrl: "https://target.invalid",
@@ -62,6 +83,7 @@ function targetProvider(): Provider {
 function cooldowns() {
 	return {
 		clearAll: () => 0,
+		clear: () => false,
 		state: () => undefined,
 		isActive: () => false,
 		recordFailure: () => ({ failCount: 1, nextRetryAt: 0, durationMs: 0 }),

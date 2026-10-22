@@ -1,3 +1,5 @@
+import type { FailureClass } from "../fallback/cooldown.ts";
+
 export interface CooldownStatusItem {
 	targetRef: string;
 	remainingMs: number;
@@ -37,13 +39,15 @@ export function formatFailoverWarning(input: {
 	nextTarget?: string;
 	cooldownMs?: number;
 	failCount?: number;
+	failureClass?: FailureClass;
 }): string {
 	const failedTarget = input.failedTarget ?? "unknown";
 	const nextTarget = input.nextTarget ?? "unknown";
 	const outcome = input.nextTarget ? `falling back to ${nextTarget}` : "chain exhausted";
+	const relogin = input.failureClass === "account" ? `; ${failedTarget.split("/")[0]}/* skipped until a new login or the cooldown ends` : "";
 	return [
 		`alias "${input.role ?? "unknown"}": ${failedTarget} failed (${oneLine(input.reason)});`,
-		`${outcome} — cooldown ${formatDuration(input.cooldownMs)} (failure ${finiteNumber(input.failCount)})`,
+		`${outcome} — cooldown ${formatDuration(input.cooldownMs)} (failure ${finiteNumber(input.failCount)})${relogin}`,
 	].join(" ");
 }
 

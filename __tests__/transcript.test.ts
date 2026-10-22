@@ -110,3 +110,39 @@ test("logs append failures without interrupting policy fallback", () => {
 
 	assert.deepEqual(events, ["append-entry-error"]);
 });
+
+test("labels a target whose provider has an account cooldown with the re-login hint", () => {
+	const states: Record<string, { failCount: number; nextRetryAt: number; credential?: string }> = {
+		"acct/*": { failCount: 1, nextRetryAt: 2_000, credential: "aaaaaaaaaaaaaaaa" },
+		"quota/*": { failCount: 1, nextRetryAt: 2_000 },
+		"other/m": { failCount: 1, nextRetryAt: 2_000 },
+		"gone/*": { failCount: 1, nextRetryAt: 500, credential: "aaaaaaaaaaaaaaaa" },
+	};
+	const cooldowns = { state: (key: string) => states[key] };
+	const aliases = new Map([["coder", ["acct/a", "quota/q", "other/m", "gone/g", "acct/b"]]]);
+	const data = createAliasTargetsEntry(aliases, undefined, cooldowns, 1_000);
+	assert.deepEqual(data.accountProviders, ["acct"]);
+	assert.equal(
+		formatAliasTargetsEntry(data),
+		[
+			"coder:",
+			"  - acct/a  [account — /login acct to resume]",
+			"  - quota/q",
+			"  - other/m",
+			"  - gone/g",
+			"  - acct/b  [account — /login acct to resume]",
+		].join("\n"),
+	);
+});
+
+test("the targets renderer shows the account label", () => {
+	const renderers = new Map<string, any>();
+	registerTranscriptRenderers({ registerEntryRenderer(type: string, renderer: any) { renderers.set(type, renderer); } } as never);
+	const theme = { fg: (_c: string, text: string) => text, bg: (_c: string, text: string) => text };
+	const box = renderers.get(ALIAS_TARGETS_ENTRY)(
+		{ data: { chains: [{ role: "coder", targets: ["acct/a"] }], accountProviders: ["acct"] } },
+		{ expanded: false },
+		theme,
+	);
+	assert.match(box.render(120).join("\n"), /acct\/a {2}\[account — \/login acct to resume\]/);
+});

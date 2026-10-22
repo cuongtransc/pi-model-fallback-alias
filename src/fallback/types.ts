@@ -1,3 +1,4 @@
+import type { FailureClass } from "./cooldown.ts";
 import type { LatencyOutcome, LatencySample, ProviderResponseMetadata } from "../latency/stats.ts";
 
 export type AliasMap = ReadonlyMap<string, readonly string[]>;
@@ -67,12 +68,15 @@ export interface FailoverEntryData extends Partial<ProviderResponseMetadata> {
 	cooldownMs: number;
 	failCount: number;
 	timestamp: number;
+	failureClass?: FailureClass;
 }
 
 export interface CooldownState {
 	failCount: number;
 	nextRetryAt: number;
 	successCount?: number;
+	/** Fingerprint of the credential in use when the entry was recorded. */
+	credential?: string;
 }
 
 export interface CooldownUpdate extends CooldownState {
@@ -81,10 +85,16 @@ export interface CooldownUpdate extends CooldownState {
 
 export interface CooldownRegistry {
 	isActive(target: string): boolean;
-	recordFailure(target: string, cooldown?: CooldownPolicy): CooldownUpdate;
+	recordFailure(target: string, cooldown?: CooldownPolicy, credential?: string): CooldownUpdate;
 	recordSuccess(target: string, resetAfter: number): void;
 	resetSuccesses(target: string): void;
 	clearAll(): number;
+	/**
+	 * Deletes one entry; returns whether it did. With `expectedCredential`, deletes
+	 * only while the stored entry still carries that credential (another process may
+	 * have re-recorded the entry under a new one) and logs it as credential-changed.
+	 */
+	clear(target: string, expectedCredential?: string): boolean;
 	state(target: string): CooldownState | undefined;
 }
 
@@ -124,7 +134,7 @@ export interface FallbackOptions<Event extends StreamEventLike> {
 	signal?: Pick<AbortSignal, "aborted">;
 	open(target: string, attemptSignal?: AbortSignal): Promise<AsyncIterable<Event>>;
 	forward(event: Event): void | Promise<void>;
-	warn(failedTarget: string, reason: string, nextTarget: string | undefined, cooldown: CooldownUpdate): void;
+	warn(failedTarget: string, reason: string, nextTarget: string | undefined, cooldown: CooldownUpdate, failureClass: FailureClass): void;
 	snapshot?(event: Event): Event;
 	timers?: TimerApi;
 	now?: () => number;
@@ -132,4 +142,8 @@ export interface FallbackOptions<Event extends StreamEventLike> {
 	onTimeout?(target: string, reason: string): void;
 	/** Runs `policy.quotaResetCommand`; defaults to a synchronous child process. */
 	runQuotaCommand?(argv: readonly string[]): string;
+	/** Fingerprint of the credential behind the target's provider; a change clears its account cooldown. */
+	credentialOf?(target: string): string | undefined;
+	/** HTTP status of the target's last failed response, when known. */
+	failureStatus?(target: string): number | undefined;
 }

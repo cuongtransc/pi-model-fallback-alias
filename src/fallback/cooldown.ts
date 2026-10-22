@@ -23,13 +23,61 @@ export const QUOTA_COOLDOWN_POLICY: CooldownPolicy = {
 	resetSuccesses: 1,
 };
 
+/** Cooldown for a dead account (expired login, missing key): same horizon as a quota. */
+export const ACCOUNT_COOLDOWN_POLICY: CooldownPolicy = {
+	baseMs: 60 * 60_000,
+	capMs: 6 * 60 * 60_000,
+	resetSuccesses: 1,
+};
+
+export type FailureClass = "quota" | "account" | "transient";
+
 // "usage limit" covers OpenCode Go's GoUsageLimitError ("Go usage limit exceeded");
 // "insufficient account funds" is OpenCode's 402 once paid credits are spent too;
+// "credit balance is too low" is Anthropic's 400 for an empty prepaid balance;
+// "run out of credits" is xAI's 403 without credits or a Grok subscription;
 // a plain "[429] Request rate limited" is transient and stays per target.
-const QUOTA_EXHAUSTED = /usage[ _]?limit|insufficient account funds/i;
+const QUOTA_EXHAUSTED =
+	/usage[ _]?limit|insufficient account funds|credit balance is too low|run out of credits/i;
+const TRANSIENT_STATUS = /\b(5\d\d|429)\b/;
+const TRANSIENT_TEXT = /temporarily unavailable|rate limited/i;
+// A token refresh that never reached a verdict: offline (undici "fetch failed", errno codes),
+// the 15 s refresh timeout or an aborted refresh, or another pi process holding auth.json's lock.
+// pi reports these inside "is unavailable: …", yet the credential may be fine.
+const REFRESH_INTERRUPTED = new RegExp(
+	[
+		"fetch failed",
+		"the operation was aborted due to timeout",
+		"token refresh aborted",
+		"login cancelled",
+		"\\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ELOCKED)\\b",
+		"lock file is already being held",
+		"unable to update lock within the stale threshold",
+		"auth storage lock was compromised",
+	].join("|"),
+	"i",
+);
+const ACCOUNT_DEAD = /is unavailable: |invalidated oauth token|invalid_grant|no api key/i;
+
+/**
+ * Quota text anywhere in the reason wins. Then transient: an HTTP status of 429 or
+ * 5xx, those status digits in the reason before its first "{" (a JSON body may
+ * quote an upstream status), or a transient phrase (temporarily unavailable, rate
+ * limited, an interrupted token refresh) anywhere in the reason. Then a dead
+ * account: HTTP 401 or account text. Anything else is transient.
+ */
+export function classifyFailure(reason: string, httpStatus?: number): FailureClass {
+	if (QUOTA_EXHAUSTED.test(reason)) return "quota";
+	const head = reason.split("{", 1)[0]!;
+	const transientStatus = httpStatus === 429 || (httpStatus !== undefined && httpStatus >= 500);
+	if (transientStatus || TRANSIENT_STATUS.test(head)) return "transient";
+	if (TRANSIENT_TEXT.test(reason) || REFRESH_INTERRUPTED.test(reason)) return "transient";
+	if (httpStatus === 401 || ACCOUNT_DEAD.test(reason)) return "account";
+	return "transient";
+}
 
 export function isQuotaExhausted(reason: string): boolean {
-	return QUOTA_EXHAUSTED.test(reason);
+	return classifyFailure(reason) === "quota";
 }
 
 /** stdout of `argv`, or "" when it cannot run, fails or exceeds 5 seconds. */
@@ -57,9 +105,13 @@ export function createCooldownRegistry(now: () => number = Date.now): CooldownRe
 			const entry = entries.get(target);
 			return entry !== undefined && entry.nextRetryAt > now();
 		},
-		recordFailure(target, cooldown) {
+		recordFailure(target, cooldown, credential) {
 			const update = nextCooldown(entries.get(target), now(), cooldown);
-			entries.set(target, { failCount: update.failCount, nextRetryAt: update.nextRetryAt });
+			entries.set(target, {
+				failCount: update.failCount,
+				nextRetryAt: update.nextRetryAt,
+				...(credential === undefined ? {} : { credential }),
+			});
 			return update;
 		},
 		recordSuccess(target, resetAfter) {
@@ -75,7 +127,12 @@ export function createCooldownRegistry(now: () => number = Date.now): CooldownRe
 		resetSuccesses(target) {
 			const entry = entries.get(target);
 			if (!entry || entry.successCount === undefined) return;
-			entries.set(target, { failCount: entry.failCount, nextRetryAt: entry.nextRetryAt });
+			const { successCount: _dropped, ...rest } = entry;
+			entries.set(target, rest);
+		},
+		clear(target, expectedCredential) {
+			if (expectedCredential !== undefined && entries.get(target)?.credential !== expectedCredential) return false;
+			return entries.delete(target);
 		},
 		clearAll() {
 			const nowMs = now();

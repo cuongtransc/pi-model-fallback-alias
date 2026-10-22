@@ -7,7 +7,7 @@ import { registerAliasApiProvider } from "./src/alias/api-registration.ts";
 import { createAliasAuth } from "./src/alias/auth-gate.ts";
 import { createSharedCooldownRegistry } from "./src/cooldown-store.ts";
 import { createDebugLog, type DebugLog } from "./src/debug-log.ts";
-import { describeFailure, type AliasConfig, type CooldownRegistry } from "./src/fallback/index.ts";
+import { describeFailure, type AliasConfig, type CooldownRegistry, type FailoverEntryData } from "./src/fallback/index.ts";
 import { EXTENSION_LATENCY_LOG_PATH, expandLogPaths, readLatencyLog } from "./src/latency/log.ts";
 import { createLatencyReport, createLatencyReportEntry } from "./src/latency/report.ts";
 import { renderStatusTick, startSession, type AliasSession as StatusSession } from "./src/status/session-status.ts";
@@ -35,6 +35,24 @@ const DEBUG_LOG = createDebugLog();
 const TARGET_COOLDOWNS = createSharedCooldownRegistry({ debugLog: DEBUG_LOG });
 
 type Registry = ExtensionContext["modelRegistry"];
+
+interface SessionOwner {
+	selectTarget(role: string, targetRef: string): void;
+	failover(data: FailoverEntryData): void;
+}
+
+const SESSION_OWNERS = Symbol.for("pi-model-fallback-alias.session-owners");
+
+/**
+ * Each load of this extension in the process, by the session it started. An in-process
+ * subagent loads it again into the parent's model runtime, and the provider registered last
+ * serves every session, so a call's footer status and failover entry go to the load that
+ * owns its session.
+ */
+function sessionOwners(): Map<string, SessionOwner> {
+	const scope = globalThis as unknown as Record<symbol, Map<string, SessionOwner> | undefined>;
+	return (scope[SESSION_OWNERS] ??= new Map());
+}
 export type AliasSession = StatusSession<Registry, ExtensionContext["ui"]>;
 
 export interface PiModelAliasDependencies {
@@ -91,6 +109,21 @@ export function installPiModelAlias(pi: ExtensionAPI, dependencies: PiModelAlias
 		statusRefreshInterval = undefined;
 	};
 
+	const owner: SessionOwner = {
+		selectTarget(role, targetRef) {
+			session.activeTargets.set(role, targetRef);
+			publishStatus();
+		},
+		failover(data) {
+			if (data.nextTarget) session.activeTargets.set(data.role, data.nextTarget);
+			reportFailover(data, session, debugLog);
+			appendFailoverEntry(pi, data, debugLog);
+			publishStatus();
+		},
+	};
+	let ownedSessionId: string | undefined;
+	const ownerOf = (sessionId: string | undefined) => (sessionId && sessionOwners().get(sessionId)) || owner;
+
 	const aliasModels = [...aliases.keys()].map((id) => aliasModel(id, PROVIDER_ID));
 	const policyFor = createPolicyLoader({
 		debugLog,
@@ -108,14 +141,11 @@ export function installPiModelAlias(pi: ExtensionAPI, dependencies: PiModelAlias
 		cooldowns: targetCooldowns,
 		debugLog,
 		timers: dependencies.timers,
-		onTargetSelected() {
-			publishStatus();
+		onTargetSelected(role, targetRef, sessionId) {
+			ownerOf(sessionId).selectTarget(role, targetRef);
 		},
-		onFailover(data) {
-			if (data.nextTarget) session.activeTargets.set(data.role, data.nextTarget);
-			reportFailover(data, session, debugLog);
-			appendFailoverEntry(pi, data, debugLog);
-			publishStatus();
+		onFailover(data, sessionId) {
+			ownerOf(sessionId).failover(data);
 		},
 	});
 	void registerAliasApiProvider(streams);
@@ -133,6 +163,8 @@ export function installPiModelAlias(pi: ExtensionAPI, dependencies: PiModelAlias
 
 	pi.on("session_start", (_event, ctx) => {
 		session.model = ctx.model;
+		ownedSessionId = ctx.sessionManager?.getSessionId();
+		if (ownedSessionId) sessionOwners().set(ownedSessionId, owner);
 		if (startSession(session, ctx, debugLog)) {
 			lastPushedText = undefined;
 			startStatusRefresh();
@@ -163,6 +195,7 @@ export function installPiModelAlias(pi: ExtensionAPI, dependencies: PiModelAlias
 
 	pi.on("session_shutdown", () => {
 		stopStatusRefresh();
+		if (ownedSessionId && sessionOwners().get(ownedSessionId) === owner) sessionOwners().delete(ownedSessionId);
 	});
 
 	pi.on("model_select", (event, ctx) => {

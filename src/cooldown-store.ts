@@ -91,13 +91,16 @@ export function createSharedCooldownRegistry(options: SharedCooldownOptions = {}
 			entries[target] = rest;
 			store.write(entries, store.now());
 		},
-		clear(target) {
+		clear(target, expectedCredential) {
 			const entries = store.reload();
-			if (!(target in entries)) return false;
+			const entry = entries[target];
+			if (!entry) return false;
+			if (expectedCredential !== undefined && entry.credential !== expectedCredential) return false;
 			store.prepareWrite();
 			delete entries[target];
 			store.write(entries, store.now());
-			store.log("cooldown-clear", { targetRef: target });
+			const reason = expectedCredential === undefined ? {} : { reason: "credential-changed" };
+			store.log("cooldown-clear", { targetRef: target, ...reason });
 			return true;
 		},
 		clearAll() {

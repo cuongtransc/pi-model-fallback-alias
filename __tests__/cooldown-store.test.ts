@@ -253,6 +253,21 @@ test("persists the credential and clears an entry for other processes", () => {
 	first.recordFailure("acct/*", undefined, "b");
 	first.clear("acct/*");
 	assert.deepEqual(logged.at(-1), ["cooldown-clear", { targetRef: "acct/*" }]);
+	first.recordFailure("acct/*", undefined, "b");
+	first.clear("acct/*", "b");
+	assert.deepEqual(logged.at(-1), ["cooldown-clear", { targetRef: "acct/*", reason: "credential-changed" }]);
+});
+
+test("a clear for a stale credential keeps an entry another process re-recorded", () => {
+	const fs = new FakeCooldownFs();
+	const first = createSharedCooldownRegistry({ dir: "/fake/logs", fs, now: () => 0 });
+	const second = createSharedCooldownRegistry({ dir: "/fake/logs", fs, now: () => 0 });
+	first.recordFailure("acct/*", undefined, "aaaaaaaaaaaaaaaa");
+	const stale = first.state("acct/*")!.credential;
+	second.recordFailure("acct/*", undefined, "bbbbbbbbbbbbbbbb");
+	assert.equal(first.clear("acct/*", stale), false);
+	assert.equal(first.state("acct/*")!.credential, "bbbbbbbbbbbbbbbb");
+	assert.equal(second.state("acct/*")!.credential, "bbbbbbbbbbbbbbbb");
 });
 
 test("a state file written before credentials existed still loads", () => {

@@ -89,8 +89,12 @@ export interface CooldownRegistry {
 	recordSuccess(target: string, resetAfter: number): void;
 	resetSuccesses(target: string): void;
 	clearAll(): number;
-	/** Deletes one entry; returns whether one existed. */
-	clear(target: string): boolean;
+	/**
+	 * Deletes one entry; returns whether it did. With `expectedCredential`, deletes
+	 * only while the stored entry still carries that credential (another process may
+	 * have re-recorded the entry under a new one) and logs it as credential-changed.
+	 */
+	clear(target: string, expectedCredential?: string): boolean;
 	state(target: string): CooldownState | undefined;
 }
 

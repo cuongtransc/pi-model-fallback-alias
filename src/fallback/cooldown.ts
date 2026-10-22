@@ -130,7 +130,8 @@ export function createCooldownRegistry(now: () => number = Date.now): CooldownRe
 			const { successCount: _dropped, ...rest } = entry;
 			entries.set(target, rest);
 		},
-		clear(target) {
+		clear(target, expectedCredential) {
+			if (expectedCredential !== undefined && entries.get(target)?.credential !== expectedCredential) return false;
 			return entries.delete(target);
 		},
 		clearAll() {

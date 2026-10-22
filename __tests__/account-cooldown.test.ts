@@ -190,3 +190,23 @@ test("a credential that reads as none never clears an account cooldown", async (
 	assert.deepEqual(opened, ["other/m"]);
 	assert.equal(cooldowns.state("acct/*")!.credential, "aaaaaaaaaaaaaaaa");
 });
+
+test("in-memory clear with an expected credential deletes only that credential's entry", () => {
+	const cooldowns = createCooldownRegistry(() => 0);
+	cooldowns.recordFailure("acct/*", ACCOUNT_COOLDOWN_POLICY, "bbbbbbbbbbbbbbbb");
+	assert.equal(cooldowns.clear("acct/*", "aaaaaaaaaaaaaaaa"), false);
+	assert.equal(cooldowns.state("acct/*")!.credential, "bbbbbbbbbbbbbbbb");
+	assert.equal(cooldowns.clear("acct/*", "bbbbbbbbbbbbbbbb"), true);
+	assert.equal(cooldowns.state("acct/*"), undefined);
+});
+
+test("the credential check clears with the stale credential it read", async () => {
+	const inner = createCooldownRegistry(() => 0);
+	const clears: unknown[][] = [];
+	const cooldowns = { ...inner, clear: (...args: Parameters<typeof inner.clear>) => (clears.push(args), inner.clear(...args)) };
+	const credential = { value: "aaaaaaaaaaaaaaaa" };
+	await chain(cooldowns, credential, [], () => true);
+	credential.value = "bbbbbbbbbbbbbbbb";
+	await chain(cooldowns, credential, [], () => false);
+	assert.deepEqual(clears, [["acct/*", "aaaaaaaaaaaaaaaa"]]);
+});

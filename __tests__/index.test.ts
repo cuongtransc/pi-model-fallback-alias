@@ -62,6 +62,7 @@ function targetProvider(): Provider {
 function cooldowns() {
 	return {
 		clearAll: () => 0,
+		clear: () => false,
 		state: () => undefined,
 		isActive: () => false,
 		recordFailure: () => ({ failCount: 1, nextRetryAt: 0, durationMs: 0 }),

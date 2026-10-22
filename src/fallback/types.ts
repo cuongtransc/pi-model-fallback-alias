@@ -73,6 +73,8 @@ export interface CooldownState {
 	failCount: number;
 	nextRetryAt: number;
 	successCount?: number;
+	/** Fingerprint of the credential in use when the entry was recorded. */
+	credential?: string;
 }
 
 export interface CooldownUpdate extends CooldownState {
@@ -81,10 +83,12 @@ export interface CooldownUpdate extends CooldownState {
 
 export interface CooldownRegistry {
 	isActive(target: string): boolean;
-	recordFailure(target: string, cooldown?: CooldownPolicy): CooldownUpdate;
+	recordFailure(target: string, cooldown?: CooldownPolicy, credential?: string): CooldownUpdate;
 	recordSuccess(target: string, resetAfter: number): void;
 	resetSuccesses(target: string): void;
 	clearAll(): number;
+	/** Deletes one entry; returns whether one existed. */
+	clear(target: string): boolean;
 	state(target: string): CooldownState | undefined;
 }
 

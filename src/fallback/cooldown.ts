@@ -84,9 +84,13 @@ export function createCooldownRegistry(now: () => number = Date.now): CooldownRe
 			const entry = entries.get(target);
 			return entry !== undefined && entry.nextRetryAt > now();
 		},
-		recordFailure(target, cooldown) {
+		recordFailure(target, cooldown, credential) {
 			const update = nextCooldown(entries.get(target), now(), cooldown);
-			entries.set(target, { failCount: update.failCount, nextRetryAt: update.nextRetryAt });
+			entries.set(target, {
+				failCount: update.failCount,
+				nextRetryAt: update.nextRetryAt,
+				...(credential === undefined ? {} : { credential }),
+			});
 			return update;
 		},
 		recordSuccess(target, resetAfter) {
@@ -102,7 +106,11 @@ export function createCooldownRegistry(now: () => number = Date.now): CooldownRe
 		resetSuccesses(target) {
 			const entry = entries.get(target);
 			if (!entry || entry.successCount === undefined) return;
-			entries.set(target, { failCount: entry.failCount, nextRetryAt: entry.nextRetryAt });
+			const { successCount: _dropped, ...rest } = entry;
+			entries.set(target, rest);
+		},
+		clear(target) {
+			return entries.delete(target);
 		},
 		clearAll() {
 			const nowMs = now();

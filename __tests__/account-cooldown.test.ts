@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ACCOUNT_COOLDOWN_POLICY, createCooldownRegistry, providerCooldownKey, runFallbackChain } from "../src/fallback/index.ts";
+import { ACCOUNT_COOLDOWN_POLICY, BUILT_IN_COOLDOWN_POLICY, createCooldownRegistry, providerCooldownKey, runFallbackChain, type TimerApi } from "../src/fallback/index.ts";
 
 test("in-memory registry stores the credential and clears an entry", () => {
 	const cooldowns = createCooldownRegistry(() => 0);
@@ -120,3 +120,60 @@ test("an entry without credential is never cleared by a check", async () => {
 	await chain(cooldowns, { value: "bbbbbbbbbbbbbbbb" }, [], () => false);
 	assert.notEqual(cooldowns.state("acct/*"), undefined);
 });
+
+test("a bare status classifies once and drives the sibling skip", async () => {
+	const cooldowns = createCooldownRegistry(() => 0);
+	const opened: string[] = [];
+	const calls: string[] = [];
+	await runFallbackChain<FakeEvent>({
+		role: "r",
+		targets: ["acct/a", "acct/b", "other/m"],
+		cooldowns,
+		credentialOf: () => "aaaaaaaaaaaaaaaa",
+		failureStatus: (target) => {
+			calls.push(target);
+			return target === "acct/a" ? 401 : undefined;
+		},
+		open: async (target) => {
+			opened.push(target);
+			return target === "acct/a" ? throwBeforeEvent("request failed") : events();
+		},
+		forward: () => undefined,
+		warn: () => undefined,
+	});
+	assert.deepEqual(opened, ["acct/a", "other/m"]);
+	assert.deepEqual(calls, ["acct/a"]);
+});
+
+test("a timeout stays per-target even when a stale 401 is recorded", async () => {
+	const cooldowns = createCooldownRegistry(() => 0);
+	const callbacks: Array<() => void> = [];
+	const timers: TimerApi = {
+		setTimeout(callback) {
+			callbacks.push(callback);
+			return {};
+		},
+		clearTimeout() {},
+	};
+	const run = runFallbackChain<FakeEvent>({
+		role: "r",
+		targets: ["acct/a", "other/m"],
+		cooldowns,
+		timers,
+		policy: { timeouts: { firstEventMs: 10 }, cooldown: BUILT_IN_COOLDOWN_POLICY },
+		credentialOf: () => "aaaaaaaaaaaaaaaa",
+		failureStatus: () => 401,
+		open: async (target) => (target === "acct/a" ? hang() : events()),
+		forward: () => undefined,
+		warn: () => undefined,
+	});
+	await new Promise((resolve) => setImmediate(resolve));
+	for (const callback of callbacks) callback();
+	await run;
+	assert.equal(cooldowns.state("acct/*"), undefined);
+	assert.notEqual(cooldowns.state("acct/a"), undefined);
+});
+
+async function* hang(): AsyncGenerator<FakeEvent> {
+	await new Promise<void>(() => undefined);
+}

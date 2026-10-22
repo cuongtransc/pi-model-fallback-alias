@@ -22,11 +22,14 @@ export type {
 } from "./types.ts";
 
 export {
+	ACCOUNT_COOLDOWN_POLICY,
 	BUILT_IN_COOLDOWN_POLICY,
 	COOLDOWN_BASE_MS,
 	COOLDOWN_CAP_MS,
+	classifyFailure,
 	createCooldownRegistry,
 	DEFAULT_STATUS_REFRESH_MS,
+	type FailureClass,
 	isQuotaExhausted,
 	MAX_STATUS_REFRESH_MS,
 	nextCooldown,

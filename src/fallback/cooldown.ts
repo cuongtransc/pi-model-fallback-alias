@@ -23,13 +23,39 @@ export const QUOTA_COOLDOWN_POLICY: CooldownPolicy = {
 	resetSuccesses: 1,
 };
 
+/** Cooldown for a dead account (expired login, missing key): same horizon as a quota. */
+export const ACCOUNT_COOLDOWN_POLICY: CooldownPolicy = {
+	baseMs: 60 * 60_000,
+	capMs: 6 * 60 * 60_000,
+	resetSuccesses: 1,
+};
+
+export type FailureClass = "quota" | "account" | "transient";
+
 // "usage limit" covers OpenCode Go's GoUsageLimitError ("Go usage limit exceeded");
 // "insufficient account funds" is OpenCode's 402 once paid credits are spent too;
 // a plain "[429] Request rate limited" is transient and stays per target.
-const QUOTA_EXHAUSTED = /usage[ _]?limit|insufficient account funds/i;
+const QUOTA_EXHAUSTED =
+	/usage[ _]?limit|insufficient account funds|credit balance is too low|run out of credits/i;
+const TRANSIENT_STATUS = /\b(5\d\d|429)\b|temporarily unavailable|rate limited/i;
+const ACCOUNT_DEAD = /is unavailable: |invalidated oauth token|invalid_grant|no api key/i;
+
+/**
+ * Quota text wins, then transient (5xx, 429, rate limit; judged on the text before
+ * any JSON body, which may quote an upstream status), then a dead account.
+ */
+export function classifyFailure(reason: string, httpStatus?: number): FailureClass {
+	if (QUOTA_EXHAUSTED.test(reason)) return "quota";
+	const head = reason.split("{", 1)[0]!;
+	if (httpStatus === 429 || (httpStatus !== undefined && httpStatus >= 500) || TRANSIENT_STATUS.test(head)) {
+		return "transient";
+	}
+	if (httpStatus === 401 || ACCOUNT_DEAD.test(reason)) return "account";
+	return "transient";
+}
 
 export function isQuotaExhausted(reason: string): boolean {
-	return QUOTA_EXHAUSTED.test(reason);
+	return classifyFailure(reason) === "quota";
 }
 
 /** stdout of `argv`, or "" when it cannot run, fails or exceeds 5 seconds. */

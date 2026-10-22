@@ -147,6 +147,7 @@ test("a bare status classifies once and drives the sibling skip", async () => {
 
 test("a timeout stays per-target even when a stale 401 is recorded", async () => {
 	const cooldowns = createCooldownRegistry(() => 0);
+	const classes: unknown[] = [];
 	const callbacks: Array<() => void> = [];
 	const timers: TimerApi = {
 		setTimeout(callback) {
@@ -165,13 +166,14 @@ test("a timeout stays per-target even when a stale 401 is recorded", async () =>
 		failureStatus: () => 401,
 		open: async (target) => (target === "acct/a" ? hang() : events()),
 		forward: () => undefined,
-		warn: () => undefined,
+		warn: (_target, _reason, _next, _cooldown, failureClass) => classes.push(failureClass),
 	});
 	await new Promise((resolve) => setImmediate(resolve));
 	for (const callback of callbacks) callback();
 	await run;
 	assert.equal(cooldowns.state("acct/*"), undefined);
 	assert.notEqual(cooldowns.state("acct/a"), undefined);
+	assert.deepEqual(classes, ["transient"]);
 });
 
 async function* hang(): AsyncGenerator<FakeEvent> {

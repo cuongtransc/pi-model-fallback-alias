@@ -17,7 +17,6 @@ import type { PolicyLoad } from "../alias-config.ts";
 import { mirrorTargetMetadata, targetsFor, ZERO_COST } from "../alias/alias-model.ts";
 import type { DebugLog } from "../debug-log.ts";
 import {
-	classifyFailure,
 	describeFailure,
 	failureStopReason,
 	runFallbackChain,
@@ -145,7 +144,7 @@ function createFallbackStream(
 				...metadataByTarget.get(sample.targetRef),
 			}),
 		onTimeout: (targetRef, reason) => debugLog.log("attempt-timeout", { role: aliasModel.id, targetRef, reason }),
-		warn: (failedTarget, reason, nextTarget, cooldown) =>
+		warn: (failedTarget, reason, nextTarget, cooldown, failureClass) =>
 			onFailover({
 				role: aliasModel.id,
 				failedTarget,
@@ -154,7 +153,7 @@ function createFallbackStream(
 				cooldownMs: cooldown.durationMs,
 				failCount: cooldown.failCount,
 				timestamp: Date.now(),
-				failureClass: classifyFailure(reason, metadataByTarget.get(failedTarget)?.httpStatus),
+				failureClass,
 				...metadataByTarget.get(failedTarget),
 			}),
 		// Pi treats a restart as a second assistant message, so safe prefixes stay hidden until commit.

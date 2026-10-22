@@ -130,7 +130,7 @@ export interface FallbackOptions<Event extends StreamEventLike> {
 	signal?: Pick<AbortSignal, "aborted">;
 	open(target: string, attemptSignal?: AbortSignal): Promise<AsyncIterable<Event>>;
 	forward(event: Event): void | Promise<void>;
-	warn(failedTarget: string, reason: string, nextTarget: string | undefined, cooldown: CooldownUpdate): void;
+	warn(failedTarget: string, reason: string, nextTarget: string | undefined, cooldown: CooldownUpdate, failureClass: FailureClass): void;
 	snapshot?(event: Event): Event;
 	timers?: TimerApi;
 	now?: () => number;

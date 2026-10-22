@@ -191,7 +191,7 @@ function warnCooldown<Event extends StreamEventLike>(
 			: failureClass === "account"
 				? cooldowns.recordFailure(providerCooldownKey(target), ACCOUNT_COOLDOWN_POLICY, options.credentialOf?.(target))
 				: cooldowns.recordFailure(target, cooldownOf(options));
-	options.warn(target, reason, nextTarget, update);
+	options.warn(target, reason, nextTarget, update, failureClass);
 }
 
 /** Classifies a failure once; a latency timeout is always transient, whatever status was last seen. */

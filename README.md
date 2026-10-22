@@ -117,10 +117,15 @@ Use an alias anywhere Pi accepts a model reference:
   `invalid_grant`) cools `<provider>/*` the same way: 1 hour, doubling up to
   6 hours, with the provider's other targets skipped in the same request. The
   first request after `/login` changes the provider's credential clears the
-  cooldown. The credential is the fingerprint of its `auth.json` entry without
-  `access`/`expires`, plus its `models.json` `apiKey` text. A key that a
+  cooldown. The credential is a hash of what pi would use, in pi's order: the
+  `auth.json` entry without `access`/`expires`, else the `models.json` `apiKey`
+  text plus the values of the env vars it names (`$NAME`, `${NAME}`), else the
+  provider's env key (for example `XAI_API_KEY`). Only the hash is stored. A
+  provider with none of these is never cleared this way. A key that a
   `!command` decrypts from a replaced file is picked up when the backoff ends or
-  by `/model-alias-reset-cooldown`.
+  by `/model-alias-reset-cooldown`. A refresh that fails offline, times out or
+  meets another pi process's lock on `auth.json` is a transient failure, not an
+  account failure.
 - Per-role latency limits can cover time to first event, event stalls, and the
   total pre-commit interval. A timeout is active only while another target
   remains.

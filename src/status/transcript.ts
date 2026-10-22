@@ -7,7 +7,9 @@ import {
 	type AliasExpansionWarning,
 	type AliasMap,
 	type AliasSettingWarning,
+	type CooldownRegistry,
 	type FailoverEntryData,
+	providerCooldownKey,
 } from "../fallback/index.ts";
 import { formatLatencyReportEntry, type LatencyReportEntryData } from "../latency/report.ts";
 import type { AliasSession } from "./session-status.ts";
@@ -24,24 +26,59 @@ export const POLICY_WARNING_ENTRY = "model-alias-policy-warning";
 export interface AliasTargetsEntryData {
 	role?: string;
 	chains: readonly { role: string; targets: readonly string[] }[];
+	/** Providers cooled for a dead account when the command ran; a new login resumes them. */
+	accountProviders?: readonly string[];
 }
 
-export function createAliasTargetsEntry(aliases: AliasMap, role?: string): AliasTargetsEntryData {
+export function createAliasTargetsEntry(
+	aliases: AliasMap,
+	role?: string,
+	cooldowns?: Pick<CooldownRegistry, "state">,
+	now: number = Date.now(),
+): AliasTargetsEntryData {
 	const roles = role ? [role] : [...aliases.keys()];
+	const chains = roles.flatMap((aliasRole) => {
+		const targets = aliases.get(aliasRole);
+		return targets ? [{ role: aliasRole, targets }] : [];
+	});
+	const accountProviders = cooldowns ? accountCooledProviders(chains, cooldowns, now) : [];
 	return {
 		...(role ? { role } : {}),
-		chains: roles.flatMap((aliasRole) => {
-			const targets = aliases.get(aliasRole);
-			return targets ? [{ role: aliasRole, targets }] : [];
-		}),
+		chains,
+		...(accountProviders.length > 0 ? { accountProviders } : {}),
 	};
+}
+
+/** An active `<provider>/*` entry that carries a credential is an account cooldown. */
+function accountCooledProviders(
+	chains: AliasTargetsEntryData["chains"],
+	cooldowns: Pick<CooldownRegistry, "state">,
+	now: number,
+): string[] {
+	const providers = new Set<string>();
+	for (const { targets } of chains) {
+		for (const target of targets) {
+			const state = cooldowns.state(providerCooldownKey(target));
+			if (state?.credential !== undefined && state.nextRetryAt > now) providers.add(providerOf(target));
+		}
+	}
+	return [...providers];
 }
 
 export function formatAliasTargetsEntry(data: AliasTargetsEntryData): string {
 	if (data.chains.length === 0) return data.role ? `Unknown alias "${data.role}"` : "No aliases configured";
+	const accountProviders = new Set(data.accountProviders ?? []);
+	const line = (target: string) => {
+		const provider = providerOf(target);
+		return accountProviders.has(provider) ? `  - ${target}  [account — /login ${provider} to resume]` : `  - ${target}`;
+	};
 	return data.chains
-		.map(({ role, targets }) => `${role}:\n${targets.length > 0 ? targets.map((target) => `  - ${target}`).join("\n") : "  (empty)"}`)
+		.map(({ role, targets }) => `${role}:\n${targets.length > 0 ? targets.map(line).join("\n") : "  (empty)"}`)
 		.join("\n\n");
+}
+
+function providerOf(target: string): string {
+	return target.slice(0, target.indexOf("/"));
 }
 
 export function appendAliasTargetsEntry(pi: ExtensionAPI, data: AliasTargetsEntryData): void {
@@ -125,7 +162,8 @@ export function registerTranscriptRenderers(pi: ExtensionAPI): void {
 		const chains = data?.chains ?? [];
 		const box = new Box(1, 1, (text) => theme.bg("customMessageBg", text));
 		box.addChild(new Text(theme.fg("dim", "[model-alias] Flattened targets"), 0, 0));
-		box.addChild(new Text(formatAliasTargetsEntry({ ...(data?.role ? { role: data.role } : {}), chains }), 0, 0));
+		const accountProviders = data?.accountProviders ? { accountProviders: data.accountProviders } : {};
+		box.addChild(new Text(formatAliasTargetsEntry({ ...(data?.role ? { role: data.role } : {}), chains, ...accountProviders }), 0, 0));
 		return box;
 	});
 	pi.registerEntryRenderer<Partial<LatencyReportEntryData>>(LATENCY_REPORT_ENTRY, (entry, { expanded }, theme) => {

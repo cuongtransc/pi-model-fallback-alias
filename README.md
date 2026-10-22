@@ -136,7 +136,8 @@ Use an alias anywhere Pi accepts a model reference:
   flattened chain: `0` is the first choice, a higher index is a fallback.
 - `/model-alias-reset-cooldown` clears shared cooldown state.
 - `/model-alias-targets [role]` renders all flattened fallback chains, or one selected
-  role, in the transcript.
+  role, in the transcript. A target whose provider is cooled for a dead account
+  is marked `[account — /login <provider> to resume]`.
 - `/model-alias-latency-report [role]` renders attempt statistics in the transcript.
 
 ## State and logs

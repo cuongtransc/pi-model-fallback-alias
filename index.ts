@@ -188,7 +188,7 @@ export function installPiModelAlias(pi: ExtensionAPI, dependencies: PiModelAlias
 			.map((role) => ({ value: role, label: role })),
 		handler: async (args) => {
 			const role = args.trim() || undefined;
-			appendAliasTargetsEntry(pi, createAliasTargetsEntry(aliases, role));
+			appendAliasTargetsEntry(pi, createAliasTargetsEntry(aliases, role, targetCooldowns));
 		},
 	});
 

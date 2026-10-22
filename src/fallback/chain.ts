@@ -1,8 +1,9 @@
 import type { TimeoutKind } from "../latency/stats.ts";
 import {
+	ACCOUNT_COOLDOWN_POLICY,
 	BUILT_IN_COOLDOWN_POLICY,
+	classifyFailure,
 	createCooldownRegistry,
-	isQuotaExhausted,
 	providerCooldownKey,
 	QUOTA_COOLDOWN_POLICY,
 	runQuotaResetCommand,
@@ -58,6 +59,7 @@ export async function runFallbackChain<Event extends StreamEventLike>(options: F
 		throw new Error(`Model alias "${options.role}" has no usable targets after config expansion`);
 	}
 	const cooldowns = options.cooldowns ?? createCooldownRegistry();
+	clearReplacedCredentials(options, cooldowns);
 	if (options.targets.length === 1) {
 		await forwardSingleTarget(options, options.targets[0]!, cooldowns);
 		return;
@@ -70,8 +72,8 @@ export async function runFallbackChain<Event extends StreamEventLike>(options: F
 		const outcome = await attemptTarget(options, attempt.target, cooldowns, index + 1 < attempts.length);
 		if (outcome.kind === "complete" || outcome.kind === "committed-failure") return;
 		if (outcome.kind === "unsafe-throw") throw outcome.error;
-		// An exhausted quota fails every model of the provider, so its later targets are not tried.
-		if (isQuotaExhausted(outcome.reason)) attempts = withoutLaterSameProvider(attempts, index);
+		// An exhausted quota or a dead account fails every model of the provider, so its later targets are not tried.
+		if (classifyFailure(outcome.reason, options.failureStatus?.(attempt.target)) !== "transient") attempts = withoutLaterSameProvider(attempts, index);
 		const nextTarget = attempts[index + 1]?.target;
 
 		failures.push({
@@ -83,6 +85,20 @@ export async function runFallbackChain<Event extends StreamEventLike>(options: F
 		warnCooldown(options, attempt.target, outcome.reason, nextTarget, cooldowns);
 	}
 	throw new Error(formatExhaustionError(options.role, orderFailures(failures)));
+}
+
+/** A provider cooled under one credential recovers as soon as its credential differs. */
+function clearReplacedCredentials<Event extends StreamEventLike>(options: FallbackOptions<Event>, cooldowns: CooldownRegistry): void {
+	if (!options.credentialOf) return;
+	const checked = new Set<string>();
+	for (const target of options.targets) {
+		const key = providerCooldownKey(target);
+		if (checked.has(key)) continue;
+		checked.add(key);
+		const stored = cooldowns.state(key)?.credential;
+		const current = stored === undefined ? undefined : options.credentialOf(target);
+		if (current !== undefined && current !== stored) cooldowns.clear(key);
+	}
 }
 
 async function forwardSingleTarget<Event extends StreamEventLike>(
@@ -164,9 +180,13 @@ function warnCooldown<Event extends StreamEventLike>(
 	nextTarget: string | undefined,
 	cooldowns: CooldownRegistry,
 ): void {
-	const update = isQuotaExhausted(reason)
-		? cooldowns.recordFailure(providerCooldownKey(target), quotaCooldownOf(options, target))
-		: cooldowns.recordFailure(target, cooldownOf(options));
+	const failureClass = classifyFailure(reason, options.failureStatus?.(target));
+	const update =
+		failureClass === "quota"
+			? cooldowns.recordFailure(providerCooldownKey(target), quotaCooldownOf(options, target))
+			: failureClass === "account"
+				? cooldowns.recordFailure(providerCooldownKey(target), ACCOUNT_COOLDOWN_POLICY, options.credentialOf?.(target))
+				: cooldowns.recordFailure(target, cooldownOf(options));
 	options.warn(target, reason, nextTarget, update);
 }
 

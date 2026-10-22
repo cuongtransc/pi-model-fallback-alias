@@ -136,4 +136,8 @@ export interface FallbackOptions<Event extends StreamEventLike> {
 	onTimeout?(target: string, reason: string): void;
 	/** Runs `policy.quotaResetCommand`; defaults to a synchronous child process. */
 	runQuotaCommand?(argv: readonly string[]): string;
+	/** Fingerprint of the credential behind the target's provider; a change clears its account cooldown. */
+	credentialOf?(target: string): string | undefined;
+	/** HTTP status of the target's last failed response, when known. */
+	failureStatus?(target: string): number | undefined;
 }

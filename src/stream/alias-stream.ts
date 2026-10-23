@@ -44,8 +44,9 @@ interface AliasStreamDependencies {
 	agentDir: string;
 	cooldowns: CooldownRegistry;
 	debugLog: DebugLog;
-	onTargetSelected(role: string, targetRef: string): void;
-	onFailover(data: FailoverEntryData): void;
+	/** `sessionId`: the session the call is for, which may belong to another load of this extension. */
+	onTargetSelected(role: string, targetRef: string, sessionId: string | undefined): void;
+	onFailover(data: FailoverEntryData, sessionId: string | undefined): void;
 }
 
 export function createAliasStreams(dependencies: AliasStreamDependencies): ProviderStreams {
@@ -116,7 +117,7 @@ function createFallbackStream(
 				);
 				session.activeTargets.set(aliasModel.id, targetRef);
 				chainIndex = targets.indexOf(targetRef);
-				onTargetSelected(aliasModel.id, targetRef);
+				onTargetSelected(aliasModel.id, targetRef, options?.sessionId);
 				debugLog.log("open-attempt", { role: aliasModel.id, targetRef, ok: true });
 				return stream;
 			} catch (error) {
@@ -155,7 +156,7 @@ function createFallbackStream(
 				timestamp: Date.now(),
 				failureClass,
 				...metadataByTarget.get(failedTarget),
-			}),
+			}, options?.sessionId),
 		// Pi treats a restart as a second assistant message, so safe prefixes stay hidden until commit.
 		snapshot: (event) => structuredClone(event),
 	})

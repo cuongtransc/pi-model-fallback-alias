@@ -9,6 +9,8 @@ const QUOTA = [
 	'402: {"type":"server_error","message":"Upstream request failed: Insufficient account funds"}',
 	'429: {"type":"GoUsageLimitError","message":"Go usage limit exceeded"}',
 	'400 {"type":"error","error":{"message":"You have reached your specified workspace API usage limits"}}',
+	// OpenCode, 64 times on one host (2026-11-19): read as transient, retried every 30 min.
+	'402: {"type":"invalid_request_error","message":"Insufficient balance. Top up at https://opencode.ai/console/wrk_X/billing?credits=1."}',
 ];
 const ACCOUNT = [
 	'Model alias "r" target "acct/a" is unavailable: OpenAI Codex token refresh failed (401): {"error":"x"}',
@@ -32,6 +34,11 @@ test("real quota reasons classify as quota", () => {
 
 test("real account reasons classify as account", () => {
 	for (const reason of ACCOUNT) assert.equal(classifyFailure(reason), "account", reason);
+});
+
+test("HTTP 402 Payment Required is quota, whatever the text", () => {
+	assert.equal(classifyFailure("request failed", 402), "quota");
+	assert.equal(classifyFailure('402: {"message":"pay up"}'), "quota");
 });
 
 test("a bare HTTP 401 is account, a bare 403 is not", () => {

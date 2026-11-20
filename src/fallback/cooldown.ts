@@ -38,7 +38,7 @@ export type FailureClass = "quota" | "account" | "transient";
 // "run out of credits" is xAI's 403 without credits or a Grok subscription;
 // a plain "[429] Request rate limited" is transient and stays per target.
 const QUOTA_EXHAUSTED =
-	/usage[ _]?limit|insufficient account funds|credit balance is too low|run out of credits/i;
+	/usage[ _]?limit|insufficient (?:account funds|balance)|credit balance is too low|run out of credits/i;
 const TRANSIENT_STATUS = /\b(5\d\d|429)\b/;
 const TRANSIENT_TEXT = /temporarily unavailable|rate limited/i;
 // A token refresh that never reached a verdict: offline (undici "fetch failed", errno codes),
@@ -60,7 +60,7 @@ const REFRESH_INTERRUPTED = new RegExp(
 const ACCOUNT_DEAD = /is unavailable: |invalidated oauth token|invalid_grant|no api key/i;
 
 /**
- * Quota text anywhere in the reason wins. Then transient: an HTTP status of 429 or
+ * Quota text anywhere in the reason wins, then HTTP 402 (status, or before the first "{"). Then transient: an HTTP status of 429 or
  * 5xx, those status digits in the reason before its first "{" (a JSON body may
  * quote an upstream status), or a transient phrase (temporarily unavailable, rate
  * limited, an interrupted token refresh) anywhere in the reason. Then a dead
@@ -69,6 +69,8 @@ const ACCOUNT_DEAD = /is unavailable: |invalidated oauth token|invalid_grant|no 
 export function classifyFailure(reason: string, httpStatus?: number): FailureClass {
 	if (QUOTA_EXHAUSTED.test(reason)) return "quota";
 	const head = reason.split("{", 1)[0]!;
+	// 402 Payment Required: the account has no credit, whatever the provider's words.
+	if (httpStatus === 402 || /\b402\b/.test(head)) return "quota";
 	const transientStatus = httpStatus === 429 || (httpStatus !== undefined && httpStatus >= 500);
 	if (transientStatus || TRANSIENT_STATUS.test(head)) return "transient";
 	if (TRANSIENT_TEXT.test(reason) || REFRESH_INTERRUPTED.test(reason)) return "transient";
